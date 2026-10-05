@@ -1,0 +1,3474 @@
+-- ZaNe ReChAt v5.1 | Deluxe Interactive Server Edition (With Direct Messages & Rank Hierarchy)
+local Players = game:GetService("Players") 
+local TweenSvc = game:GetService("TweenService") 
+local UIS = game:GetService("UserInputService") 
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local SoundService = game:GetService("SoundService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CoreGui = pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui") or nil
+
+local Player = Players.LocalPlayer 
+local PlayerGui = Player:WaitForChild("PlayerGui")
+local PlayerName = Player.Name
+local DisplayName = Player.DisplayName
+local UserId = Player.UserId
+
+-- Server-Isolated Endpoint Key
+local SERVER_KEY = (game.JobId ~= "" and game.JobId) or "StudioServer"
+
+-- Static Ranks Configuration
+local SPECIAL_RANKS = {
+    ["ahmed_noobda7"]     = {title = "[DIRECTOR]", type = "rgb"},
+    ["cr1mz_zane"]        = {title = "[DIRECTOR]", type = "rgb"},
+    ["pariqueen775"]      = {title = "[CUTE]", color = Color3.fromRGB(255, 40, 40)},
+    ["lunargotbanned7"]   = {title = "[COMGOD]", type = "rgb"},
+    ["kabir_priv"]        = {title = "[VIP]", color = Color3.fromRGB(0, 50, 180)},
+    ["mikeboyff"]         = {title = "[DIRECTOR]", type = "rgb"},
+    ["editer_pxx"]        = {title = "[DIRECTOR]", type = "rgb"},
+    ["mr_kittuuu"]        = {title = "[GOLDEN VIP]", color = Color3.fromRGB(255, 215, 0)},
+    ["legend"]            = {title = "[LEGEND]", color = Color3.fromRGB(255, 0, 0)},
+    ["batman"]            = {title = "[BATMAN]", color = Color3.fromRGB(0, 0, 0)},
+    ["daddy"]             = {title = "[DADDY]", type = "rgb"},
+    ["og"]                = {title = "[OG]", type = "rgb"},
+    ["randy"]             = {title = "[RANDY]", color = Color3.fromRGB(255, 105, 180)},
+    
+    -- NEW RGB & COLOR TAGS
+    ["apex_shadow728"]    = {title = "[BABE]", type = "rgb"},
+    ["archugotbanned6"]   = {title = "[CUTE]", type = "rgb"},
+    ["aadi55523"]         = {title = "[PAPPU PELU]", color = Color3.fromRGB(255, 215, 0)}
+}
+
+-- Dynamic Firebase Rank Store
+local DYNAMIC_RANKS = {}
+
+local function getSpecialRank(username)
+    if not username then return nil end
+    local lowerName = string.lower(username)
+    local dynamicRank = DYNAMIC_RANKS[lowerName]
+    if dynamicRank ~= nil then
+        if dynamicRank == false or dynamicRank.title == "[MEMBER]" or dynamicRank.title == "NONE" then
+            return nil
+        end
+        local expiresAt = tonumber(dynamicRank.expiresAt)
+        if expiresAt and os.time() >= expiresAt then
+            DYNAMIC_RANKS[lowerName] = nil
+            return SPECIAL_RANKS[lowerName]
+        end
+        return dynamicRank
+    end
+    return SPECIAL_RANKS[lowerName]
+end
+
+local function isDirectorUser(name)
+    local rank = getSpecialRank(name)
+    return rank and rank.title == "[DIRECTOR]"
+end
+
+local function isCreatorUser(name)
+    local rank = getSpecialRank(name)
+    return rank and (rank.title == "[CREATOR]" or rank.title == "[DIRECTOR]")
+end
+
+local function hasAdminAccess(name)
+    return isDirectorUser(name) or isCreatorUser(name)
+end
+
+-- Global music playback is restricted to Directors and NoobKaGulam.
+local function hasMusicAccess(name)
+    return name and string.lower(name) == "noobkagulam"
+end
+
+local function canControlGlobalMusic(name)
+    return isDirectorUser(name) or hasMusicAccess(name)
+end
+
+-- Forward declaration used by the Music-tab download callback.
+local publishGlobalMusicUrl
+
+-- Clipboard Helper (kept for context menu)
+local function CopyToClipboard(text)
+    if setclipboard then
+        pcall(function() setclipboard(text) end)
+        print("[ZaNe ReChAt] Copied to clipboard:", text)
+    else
+        warn("[ZaNe ReChAt] Clipboard function (setclipboard) is unsupported in this executor.")
+    end
+end
+
+-- Firebase Credentials
+local FIREBASE_URL = "https://chat-v2-ec821-default-rtdb.asia-southeast1.firebasedatabase.app/"
+local FIREBASE_SECRET = "b8734b264c0badbbb1c3bb53b4af9801692af8d4"
+local FIREBASE_PFP_URL = "https://chat-v2-ec821-default-rtdb.asia-southeast1.firebasedatabase.app/SecretPFP_" .. SERVER_KEY .. ".json?auth=" .. FIREBASE_SECRET
+
+local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request or (fluxus and fluxus.request)
+
+local function sendFirebaseData(endpoint, payload)
+    local url = FIREBASE_URL .. endpoint .. ".json?auth=" .. FIREBASE_SECRET
+    local json = HttpService:JSONEncode(payload)
+    if httpRequest then
+        task.spawn(function()
+            pcall(function()
+                httpRequest({
+                    Url = url,
+                    Method = "POST",
+                    Headers = {["Content-Type"] = "application/json"},
+                    Body = json
+                })
+            end)
+        end)
+    end
+end
+
+local function putFirebaseData(endpoint, payload)
+    local url = FIREBASE_URL .. endpoint .. ".json?auth=" .. FIREBASE_SECRET
+    local json = HttpService:JSONEncode(payload)
+    if httpRequest then
+        task.spawn(function()
+            pcall(function()
+                httpRequest({
+                    Url = url,
+                    Method = "PUT",
+                    Headers = {["Content-Type"] = "application/json"},
+                    Body = json
+                })
+            end)
+        end)
+    end
+end
+
+local function patchFirebaseData(endpoint, payload)
+    local url = FIREBASE_URL .. endpoint .. ".json?auth=" .. FIREBASE_SECRET
+    local json = HttpService:JSONEncode(payload)
+    if httpRequest then
+        task.spawn(function()
+            pcall(function()
+                httpRequest({
+                    Url = url,
+                    Method = "PATCH",
+                    Headers = {["Content-Type"] = "application/json"},
+                    Body = json
+                })
+            end)
+        end)
+    end
+end
+
+local function deleteFirebaseData(endpoint)
+    local url = FIREBASE_URL .. endpoint .. ".json?auth=" .. FIREBASE_SECRET
+    if httpRequest then
+        task.spawn(function()
+            pcall(function()
+                httpRequest({
+                    Url = url,
+                    Method = "DELETE"
+                })
+            end)
+        end)
+    end
+end
+
+local function getFirebaseData(endpoint)
+    local url = FIREBASE_URL .. endpoint .. ".json?auth=" .. FIREBASE_SECRET
+    if httpRequest then
+        local success, response = pcall(function()
+            return httpRequest({Url = url, Method = "GET"})
+        end)
+        if success and response and response.Body and response.Body ~= "null" then
+            local decSuccess, decoded = pcall(function() return HttpService:JSONDecode(response.Body) end)
+            if decSuccess then return decoded end
+        end
+    end
+    return nil
+end
+
+-- Load Dynamic Ranks
+local function syncRanks()
+    local ranksData = getFirebaseData("dynamic_ranks")
+    if ranksData then
+        DYNAMIC_RANKS = {}
+        for user, rData in pairs(ranksData) do
+            if type(rData) == "table" then
+                local lowerUser = string.lower(user)
+                local expiresAt = tonumber(rData.expiresAt)
+                if expiresAt and os.time() >= expiresAt then
+                    -- Expired temporary ranks fall back to any static rank.
+                    DYNAMIC_RANKS[lowerUser] = nil
+                elseif rData.title == "NONE" or rData.removed == true then
+                    DYNAMIC_RANKS[lowerUser] = false
+                elseif rData.type == "rgb" then
+                    DYNAMIC_RANKS[lowerUser] = {title = rData.title, type = "rgb", expiresAt = expiresAt}
+                elseif rData.r and rData.g and rData.b then
+                    DYNAMIC_RANKS[lowerUser] = {title = rData.title, color = Color3.fromRGB(rData.r, rData.g, rData.b), expiresAt = expiresAt}
+                else
+                    DYNAMIC_RANKS[lowerUser] = {title = rData.title, color = Color3.fromRGB(255, 215, 0), expiresAt = expiresAt}
+                end
+            end
+        end
+    end
+end
+syncRanks()
+
+-- Strict Ban Check on Execution
+if not isDirectorUser(PlayerName) then
+    local banCheck = getFirebaseData("bans/" .. PlayerName:lower())
+    if banCheck and banCheck.banned then
+        local bannedBy = banCheck.by or "Staff"
+        local banReason = banCheck.reason or "No reason specified"
+        Player:Kick("🔨 You are banned by Staff " .. bannedBy .. ". Reason: " .. banReason)
+        return
+    end
+end
+
+-- Director Join Notification
+local DIRECTOR_ASSET_ID = "rbxassetid://7106937875"
+local DIRECTOR_PLAY_DURATION = 7
+
+local directorJoinSound = Instance.new("Sound")
+directorJoinSound.Name = "DirectorJoinSound"
+directorJoinSound.SoundId = DIRECTOR_ASSET_ID
+directorJoinSound.Volume = 1
+directorJoinSound.Parent = SoundService
+
+local function handleDirectorJoin(plr)
+    if isDirectorUser(plr.Name) then
+        print("DIRECTOR SIR JOIN THE CHAT")
+        directorJoinSound.TimePosition = 0
+        directorJoinSound:Play()
+        task.delay(DIRECTOR_PLAY_DURATION, function()
+            directorJoinSound:Stop()
+        end)
+    end
+end
+
+for _, p in ipairs(Players:GetPlayers()) do
+    handleDirectorJoin(p)
+end
+Players.PlayerAdded:Connect(handleDirectorJoin)
+
+-- RolePlay Remote Auto-Sync
+task.spawn(function()
+    local success, RE = pcall(function() return ReplicatedStorage:WaitForChild("RE", 5) end)
+    if RE then
+        local NameRemote = RE:FindFirstChild("1RPNam1eTex1t") or RE:WaitForChild("1RPNam1eTex1t", 5)
+        local ColorRemote = RE:FindFirstChild("1RPNam1eColo1r") or RE:WaitForChild("1RPNam1eColo1r", 5)
+
+        if NameRemote and ColorRemote then
+            local upperDisplayName = string.upper(DisplayName or PlayerName)
+            NameRemote:FireServer("RolePlayName", "_ᴢᴀɴᴇ ʀᴇᴄʜᴀᴛ_")
+            NameRemote:FireServer("RolePlayBio", "_ " .. upperDisplayName .. " _")
+
+            task.spawn(function()
+                while true do
+                    local c = Color3.fromHSV(tick() % 5 / 5, 1, 1)
+                    ColorRemote:FireServer("PickingRPNameColor", c)
+                    ColorRemote:FireServer("PickingRPBioColor", c)
+                    task.wait(0.1)
+                end
+            end)
+        end
+    end
+end)
+
+-- Session State
+local sessionStartTime = os.time()
+local currentHue = 0.75 
+local isLocked = false
+local isDarkMode = true
+local isInitialLoad = true
+local processedMessages = {}
+local processedDMs = {}
+local renderedMessageIds = {}
+local messageFrames = {}
+local messageTextLabels = {}
+local soundEnabled = true 
+local replyingToMsg = nil
+local dmReplyingTo = nil
+local lastPlayedMusicId = ""
+local globalMusicInitialized = false
+local lastGlobalAnnouncementId = nil
+local globalAnnouncementInitialized = false
+local globalStateLastPoll = 0
+local currentGlobalVolume = 2
+local HOLD_TIME = 0.8
+local currentDMTarget = nil
+
+-- PFP SYSTEM
+local UserPFPs = {}
+local CurrentSelectedPFP = nil
+
+-- ALL 129 PFP OPTIONS
+local PFPOptions = {
+    -- Original PFPs (32)
+    {Name = "Messi", ID = "11992703858"},
+    {Name = "Ronaldo Nextbot", ID = "10487246132"},
+    {Name = "Son Goku Ultra Instinct", ID = "7625033282"},
+    {Name = "Gojo Satoru", ID = "9242918232"},
+    {Name = "Giga Chad", ID = "10590477450"},
+    {Name = "Rickroll", ID = "6403436082"},
+    {Name = "Shocked Guy", ID = "11818627075"},
+    {Name = "Among Us Man", ID = "9180622670"},
+    {Name = "Cat Gun", ID = "5205790826"},
+    {Name = "Shocked at Banana", ID = "9605261863"},
+    {Name = "Straw Hat Pirates", ID = "9478562327"},
+    {Name = "The Rock", ID = "8425069728"},
+    {Name = "Cat Standing", ID = "9142678957"},
+    {Name = "Meme Dog", ID = "9835676498"},
+    {Name = "Luffy", ID = "10511856020"},
+    {Name = "One Piece Luffy", ID = "8964489645"},
+    {Name = "Banana Cat", ID = "5009915812"},
+    {Name = "Dragones Kanna", ID = "8332960925"},
+    {Name = "Sonic Meme", ID = "10491133376"},
+    {Name = "Skeleton Meme", ID = "10180536602"},
+    {Name = "Sigma", ID = "11600511955"},
+    {Name = "Sad Spongebob", ID = "10729455663"},
+    {Name = "Megamind Meme", ID = "10180628714"},
+    {Name = "Bing Chilling", ID = "9895184382"},
+    {Name = "Gengar Crosshair", ID = "11759293347"},
+    {Name = "Dragon Ball Crosshair", ID = "11759193017"},
+    {Name = "Cat in Milk", ID = "7220505725"},
+    {Name = "Peter Griffin", ID = "4632517063"},
+    {Name = "Among Us Imposter", ID = "5747127696"},
+    {Name = "Sus Dog", ID = "11648237431"},
+    {Name = "Cheems Dog", ID = "9676276958"},
+    {Name = "Makima", ID = "11902680347"},
+    
+    -- New Anime PFPs (31)
+    {Name = "Douma", ID = "8982623704"},
+    {Name = "Hanako Kun", ID = "4996280309"},
+    {Name = "Hange", ID = "6072474496"},
+    {Name = "Hello Kitty", ID = "6243239316"},
+    {Name = "Zenitsu", ID = "6239939495"},
+    {Name = "Sad Anime Girl", ID = "6239938337"},
+    {Name = "Yoo", ID = "6239943491"},
+    {Name = "Noelle", ID = "6239942849"},
+    {Name = "Sad Anime Boy", ID = "6239948718"},
+    {Name = "Cover", ID = "6239914883"},
+    {Name = "Gojo Grey Hair", ID = "6239940100"},
+    {Name = "Aesthetic Anime Girl", ID = "8652665149"},
+    {Name = "Power (Chainsaw Man)", ID = "11778372953"},
+    {Name = "Blank White Eyes OC", ID = "9794138570"},
+    {Name = "Nezuko", ID = "5444301611"},
+    {Name = "Anya", ID = "9657394390"},
+    {Name = "Satoru Gojo", ID = "11486398809"},
+    {Name = "L (Death Note)", ID = "5833222294"},
+    {Name = "One Piece Logo", ID = "9933991033"},
+    {Name = "Kawaii Cat", ID = "1076805417"},
+    {Name = "Dark Aesthetic Girl", ID = "10341849885"},
+    {Name = "Bachira (Blue Lock)", ID = "11636146039"},
+    {Name = "Anime Boy", ID = "8592618675"},
+    {Name = "Umaru", ID = "8598068650"},
+    {Name = "Kokomi (Genshin)", ID = "11761637789"},
+    {Name = "Eren (AoT)", ID = "6479589870"},
+    {Name = "Shrek the Anime", ID = "1025976477"},
+    {Name = "Bunny with Peach", ID = "2222586071"},
+    {Name = "Blue Mob", ID = "10218442298"},
+    {Name = "Kawaii Anime Girl", ID = "11425468695"},
+    {Name = "Asta and Demon", ID = "9030081191"},
+    
+    -- New Meme PFPs (26)
+    {Name = "Beluga", ID = "7129155278"},
+    {Name = "Cursed Flushed", ID = "4567880251"},
+    {Name = "Smug Face", ID = "5004745643"},
+    {Name = "Moon", ID = "17007876976"},
+    {Name = "Aesthetic Anime Face", ID = "5191098772"},
+    {Name = "Pikachu", ID = "732601106"},
+    {Name = "Trump", ID = "415885550"},
+    {Name = "Anime Face", ID = "3241672660"},
+    {Name = "Rainbow Cat Tail", ID = "469008772"},
+    {Name = "Caution Sparta", ID = "2011952"},
+    {Name = "Doge", ID = "130742397"},
+    {Name = "Creepy Mr Bean", ID = "91635222"},
+    {Name = "Love Doge", ID = "525701437"},
+    {Name = "Epic Face", ID = "109251560"},
+    {Name = "Help Rickroll", ID = "6403436082"},
+    {Name = "Bongo Cat", ID = "2368504441"},
+    {Name = "The Rock", ID = "11435555509"},
+    {Name = "Windows XP Error", ID = "4519042263"},
+    {Name = "Mike Bruh Face", ID = "6090344677"},
+    {Name = "Amazon Box", ID = "4700049612"},
+    {Name = "Roblox Meme", ID = "7279137105"},
+    {Name = "Saul Goodman", ID = "10586142459"},
+    {Name = "Well Known Meme", ID = "1299973478"},
+    {Name = "Round Penguin", ID = "5399142179"},
+    {Name = "NO TRESPASSING", ID = "1325644123"},
+    {Name = "Emergency Exit", ID = "14191700517"},
+    
+    -- New FNF PFPs (27)
+    {Name = "Zavodila", ID = "6553589083"},
+    {Name = "V.S. Garcello", ID = "6782702098"},
+    {Name = "Mod Worship", ID = "6550555045"},
+    {Name = "Parish", ID = "6718589518"},
+    {Name = "Empty FNF", ID = "6888938494"},
+    {Name = "Ugh Sky", ID = "6690848964"},
+    {Name = "Sugar Rush", ID = "6716384631"},
+    {Name = "Marvelous", ID = "10386102050"},
+    {Name = "Sick", ID = "10386104256"},
+    {Name = "Trio in Car", ID = "8146208773"},
+    {Name = "Good", ID = "10386098900"},
+    {Name = "Dave & Bambi", ID = "8705972246"},
+    {Name = "Unloaded Boy", ID = "9206925544"},
+    {Name = "The Girl FNF", ID = "6445989296"},
+    {Name = "Bad", ID = "10393986425"},
+    {Name = "Cuphead FNF", ID = "9340709670"},
+    {Name = "Sonic FNF", ID = "6536394234"},
+    {Name = "PhantomArcade Mario", ID = "10619210861"},
+    {Name = "Frostbite", ID = "11491862692"},
+    {Name = "Madotsuki", ID = "7980376963"},
+    {Name = "Huggy Wuggy", ID = "7936191575"},
+    {Name = "Ronald McDonald", ID = "6524922771"},
+    {Name = "FNF Nikku", ID = "7440063531"},
+    {Name = "Senpai", ID = "6744244201"},
+    {Name = "Sarvente Had Enough", ID = "6723867507"},
+    {Name = "Sarvente FNF", ID = "10277622363"},
+    {Name = "Pico's School", ID = "6962282598"},
+    
+    -- New Scary/Halloween PFPs (13)
+    {Name = "Halloween House", ID = "5746417732"},
+    {Name = "Uncanny Mr Fantastic", ID = "8395655531"},
+    {Name = "Haunted House", ID = "7419913829"},
+    {Name = "Bat and Moon", ID = "5758643056"},
+    {Name = "Bats Halloween", ID = "13915312936"},
+    {Name = "Smile In The Dark", ID = "9182757592"},
+    {Name = "Pentagram", ID = "464093673"},
+    {Name = "Scary Image", ID = "7307851339"},
+    {Name = "Noise Face", ID = "11539168339"},
+    {Name = "Scary Black Cat", ID = "2752828722"},
+    {Name = "Hisoka Scary", ID = "10694691145"},
+    {Name = "Ghost Twins", ID = "314722698"},
+    {Name = "Horror Face", ID = "2891891795"},
+}
+
+local function getPFPImageURL(assetId)
+    return "rbxthumb://type=Asset&id=" .. tostring(assetId) .. "&w=420&h=420"
+end
+
+local function getUserPFP(userId, userName)
+    local lookupKey = tostring(userId) or userName
+    if UserPFPs[lookupKey] then
+        return UserPFPs[lookupKey]
+    end
+    return nil
+end
+
+local function setUserPFP(assetId)
+    CurrentSelectedPFP = assetId
+    local pfpURL = getPFPImageURL(assetId)
+    UserPFPs[tostring(Player.UserId)] = pfpURL
+    UserPFPs[Player.Name] = pfpURL
+    UserPFPs[Player.DisplayName] = pfpURL
+    
+    task.spawn(function()
+        pcall(function()
+            if httpRequest then
+                httpRequest({
+                    Url = FIREBASE_URL .. "SecretPFP_" .. SERVER_KEY .. "/" .. tostring(Player.UserId) .. ".json?auth=" .. FIREBASE_SECRET,
+                    Method = "PUT",
+                    Headers = {["Content-Type"] = "application/json"},
+                    Body = HttpService:JSONEncode({
+                        AssetId = assetId,
+                        UserId = Player.UserId,
+                        Name = Player.Name,
+                        DisplayName = Player.DisplayName,
+                        Timestamp = os.time()
+                    })
+                })
+            end
+        end)
+    end)
+end
+
+task.spawn(function()
+    while task.wait(3) do
+        pcall(function()
+            local response = getFirebaseData("SecretPFP_" .. SERVER_KEY)
+            if response then
+                for userId, pfpData in pairs(response) do
+                    if pfpData and pfpData.AssetId then
+                        local pfpURL = getPFPImageURL(pfpData.AssetId)
+                        UserPFPs[userId] = pfpURL
+                        if pfpData.Name then UserPFPs[pfpData.Name] = pfpURL end
+                        if pfpData.DisplayName then UserPFPs[pfpData.DisplayName] = pfpURL end
+                    end
+                end
+            end
+        end)
+    end
+end)
+
+task.spawn(function()
+    pcall(function()
+        local response = getFirebaseData("SecretPFP_" .. SERVER_KEY .. "/" .. tostring(Player.UserId))
+        if response and response.AssetId then
+            CurrentSelectedPFP = response.AssetId
+            UserPFPs[tostring(Player.UserId)] = getPFPImageURL(response.AssetId)
+            UserPFPs[Player.Name] = getPFPImageURL(response.AssetId)
+            UserPFPs[Player.DisplayName] = getPFPImageURL(response.AssetId)
+        end
+    end)
+end)
+
+local function createPFPTab(parent)
+    local PFPContentFrame = Instance.new("Frame", parent)
+    PFPContentFrame.Size = UDim2.new(1, 0, 1, 0)
+    PFPContentFrame.BackgroundTransparency = 1
+    PFPContentFrame.Visible = false
+    PFPContentFrame.ZIndex = 501
+    
+    local PFPHeader = Instance.new("TextLabel")
+    PFPHeader.Size = UDim2.new(1, -30, 0, 30)
+    PFPHeader.Position = UDim2.new(0, 15, 0, 5)
+    PFPHeader.BackgroundTransparency = 1
+    PFPHeader.Text = "SELECT YOUR PROFILE PICTURE (" .. #PFPOptions .. " options)"
+    PFPHeader.TextColor3 = Color3.fromRGB(255, 255, 255)
+    PFPHeader.Font = Enum.Font.GothamBold
+    PFPHeader.TextSize = 12
+    PFPHeader.ZIndex = 3
+    PFPHeader.Parent = PFPContentFrame
+    
+    local CurrentPFPPreview = Instance.new("Frame")
+    CurrentPFPPreview.Size = UDim2.new(0, 60, 0, 60)
+    CurrentPFPPreview.Position = UDim2.new(1, -75, 0, 5)
+    CurrentPFPPreview.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
+    CurrentPFPPreview.BorderSizePixel = 0
+    CurrentPFPPreview.ZIndex = 3
+    CurrentPFPPreview.Parent = PFPContentFrame
+    
+    local CPPCorner = Instance.new("UICorner")
+    CPPCorner.CornerRadius = UDim.new(1, 0)
+    CPPCorner.Parent = CurrentPFPPreview
+    
+    local CPPStroke = Instance.new("UIStroke")
+    CPPStroke.Thickness = 2
+    CPPStroke.Color = Color3.fromRGB(255, 20, 147)
+    CPPStroke.Parent = CurrentPFPPreview
+    
+    local CPPImage = Instance.new("ImageLabel")
+    CPPImage.Size = UDim2.new(1, -4, 1, -4)
+    CPPImage.Position = UDim2.new(0, 2, 0, 2)
+    CPPImage.BackgroundTransparency = 1
+    CPPImage.ZIndex = 4
+    CPPImage.Parent = CurrentPFPPreview
+    
+    local CPPImageCorner = Instance.new("UICorner")
+    CPPImageCorner.CornerRadius = UDim.new(1, 0)
+    CPPImageCorner.Parent = CPPImage
+    
+    local CPPLabel = Instance.new("TextLabel")
+    CPPLabel.Size = UDim2.new(0, 70, 0, 15)
+    CPPLabel.Position = UDim2.new(1, -80, 0, 68)
+    CPPLabel.BackgroundTransparency = 1
+    CPPLabel.Text = "Current"
+    CPPLabel.TextColor3 = Color3.fromRGB(150, 150, 160)
+    CPPLabel.Font = Enum.Font.Gotham
+    CPPLabel.TextSize = 8
+    CPPLabel.ZIndex = 3
+    CPPLabel.Parent = PFPContentFrame
+    
+    local PFPDisplay = Instance.new("ScrollingFrame")
+    PFPDisplay.Size = UDim2.new(1, -30, 1, -65)
+    PFPDisplay.Position = UDim2.new(0, 15, 0, 38)
+    PFPDisplay.BackgroundTransparency = 1
+    PFPDisplay.CanvasSize = UDim2.new(0, 0, 0, 0)
+    PFPDisplay.ScrollBarThickness = 4
+    PFPDisplay.ScrollBarImageColor3 = Color3.fromRGB(255, 20, 147)
+    PFPDisplay.ZIndex = 2
+    PFPDisplay.ClipsDescendants = true
+    PFPDisplay.Parent = PFPContentFrame
+    
+    local PFPGridLayout = Instance.new("UIGridLayout")
+    PFPGridLayout.CellSize = UDim2.new(0, 85, 0, 85)
+    PFPGridLayout.CellPadding = UDim2.new(0, 12, 0, 12)
+    PFPGridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    PFPGridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    PFPGridLayout.Parent = PFPDisplay
+    
+    local function updatePFPCanvas()
+        task.wait(0.1)
+        local contentSize = PFPGridLayout.AbsoluteContentSize
+        if contentSize.Y > 0 then
+            PFPDisplay.CanvasSize = UDim2.new(0, 0, 0, contentSize.Y + 20)
+        end
+    end
+    
+    PFPGridLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updatePFPCanvas)
+    
+    for i, pfp in ipairs(PFPOptions) do
+        local PFPBtn = Instance.new("ImageButton")
+        PFPBtn.Name = "PFP_" .. i
+        PFPBtn.Size = UDim2.new(0, 85, 0, 85)
+        PFPBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
+        PFPBtn.Image = getPFPImageURL(pfp.ID)
+        PFPBtn.ImageColor3 = Color3.fromRGB(255, 255, 255)
+        PFPBtn.ScaleType = Enum.ScaleType.Fit
+        PFPBtn.ZIndex = 3
+        PFPBtn.Parent = PFPDisplay
+        
+        local PFPBtnCorner = Instance.new("UICorner")
+        PFPBtnCorner.CornerRadius = UDim.new(0, 10)
+        PFPBtnCorner.Parent = PFPBtn
+        
+        local PFPBtnStroke = Instance.new("UIStroke")
+        PFPBtnStroke.Thickness = 1.5
+        PFPBtnStroke.Color = Color3.fromRGB(50, 50, 60)
+        PFPBtnStroke.Parent = PFPBtn
+        
+        local PFPName = Instance.new("TextLabel")
+        PFPName.Size = UDim2.new(1, 0, 0, 16)
+        PFPName.Position = UDim2.new(0, 0, 1, -16)
+        PFPName.BackgroundTransparency = 1
+        PFPName.Text = string.sub(pfp.Name, 1, 14)
+        PFPName.TextColor3 = Color3.fromRGB(180, 180, 190)
+        PFPName.Font = Enum.Font.Gotham
+        PFPName.TextSize = 8
+        PFPName.ZIndex = 4
+        PFPName.Parent = PFPBtn
+        
+        PFPBtn.Activated:Connect(function()
+            setUserPFP(pfp.ID)
+            CPPImage.Image = getPFPImageURL(pfp.ID)
+            for _, child in ipairs(PFPDisplay:GetChildren()) do
+                if child:IsA("ImageButton") then
+                    local stroke = child:FindFirstChild("UIStroke")
+                    if stroke then stroke.Color = Color3.fromRGB(50, 50, 60) end
+                end
+            end
+            local stroke = PFPBtn:FindFirstChild("UIStroke")
+            if stroke then stroke.Color = Color3.fromRGB(255, 20, 147) end
+            sendBigWhiteNotification("✅ PFP changed to: " .. pfp.Name)
+        end)
+        
+        if CurrentSelectedPFP == pfp.ID then
+            CPPImage.Image = getPFPImageURL(pfp.ID)
+            local stroke = PFPBtn:FindFirstChild("UIStroke")
+            if stroke then stroke.Color = Color3.fromRGB(255, 20, 147) end
+        end
+    end
+    
+    task.delay(0.2, updatePFPCanvas)
+    
+    return PFPContentFrame
+end
+
+local function getDMChannelKey(u1, u2)
+    local id1 = tonumber(u1) or 0
+    local id2 = tonumber(u2) or 0
+    return (id1 < id2) and (id1 .. "_" .. id2) or (id2 .. "_" .. id1)
+end
+
+-- ALL 61 STICKERS
+local PRESET_ASSETS = {
+    {url="rbxthumb://type=Asset&id=126155452969559&w=420&h=420", label="Sticker 1"},
+    {url="rbxthumb://type=Asset&id=76528918733148&w=420&h=420", label="Sticker 2"},
+    {url="rbxthumb://type=Asset&id=139746534721570&w=420&h=420", label="Sticker 3"},
+    {url="rbxthumb://type=Asset&id=107882158860216&w=420&h=420", label="Sticker 4"},
+    {url="rbxthumb://type=Asset&id=99467189295335&w=420&h=420", label="Sticker 5"},
+    {url="rbxthumb://type=Asset&id=114738142020573&w=420&h=420", label="Sticker 6"},
+    {url="rbxthumb://type=Asset&id=100644268219896&w=420&h=420", label="Sticker 7"},
+    {url="rbxthumb://type=Asset&id=82732486060449&w=420&h=420", label="Sticker 8"},
+    {url="rbxthumb://type=Asset&id=84345768144066&w=420&h=420", label="Sticker 9"},
+    {url="rbxthumb://type=Asset&id=85611228914039&w=420&h=420", label="Sticker 10"},
+    {url="rbxthumb://type=Asset&id=126857592936719&w=420&h=420", label="Sticker 11"},
+    {url="rbxthumb://type=Asset&id=106945724992072&w=420&h=420", label="Sticker 12"},
+    {url="rbxthumb://type=Asset&id=102454731178873&w=420&h=420", label="Sticker 13"},
+    {url="rbxthumb://type=Asset&id=33230128&w=420&h=420", label="Sticker 14"},
+    {url="rbxthumb://type=Asset&id=33199969&w=420&h=420", label="Sticker 15"},
+    {url="rbxthumb://type=Asset&id=33200194&w=420&h=420", label="Sticker 16"},
+    {url="rbxthumb://type=Asset&id=33200310&w=420&h=420", label="Sticker 17"},
+    {url="rbxthumb://type=Asset&id=33200394&w=420&h=420", label="Sticker 18"},
+    {url="rbxthumb://type=Asset&id=250852269&w=420&h=420", label="Sticker 19"},
+    {url="rbxthumb://type=Asset&id=146447101&w=420&h=420", label="Sticker 20"},
+    {url="rbxthumb://type=Asset&id=36061967&w=420&h=420", label="Sticker 21"},
+    {url="rbxthumb://type=Asset&id=31325913&w=420&h=420", label="Sticker 22"},
+    {url="rbxthumb://type=Asset&id=15805629980&w=420&h=420", label="Sticker 23"},
+    {url="rbxthumb://type=Asset&id=16022747924&w=420&h=420", label="Sticker 24"},
+    {url="rbxthumb://type=Asset&id=87693756574279&w=420&h=420", label="Sticker 25"},
+    {url="rbxthumb://type=Asset&id=72793460663497&w=420&h=420", label="Sticker 26"},
+    {url="rbxthumb://type=Asset&id=72687512455219&w=420&h=420", label="Sticker 27"},
+    {url="rbxthumb://type=Asset&id=95112780943766&w=420&h=420", label="Sticker 28"},
+    {url="rbxthumb://type=Asset&id=130819442854007&w=420&h=420", label="Sticker 29"},
+    {url="rbxthumb://type=Asset&id=15995320422&w=420&h=420", label="Sticker 30"},
+    {url="rbxthumb://type=Asset&id=97531898393056&w=420&h=420", label="Sticker 31"},
+    {url="rbxthumb://type=Asset&id=140080676995337&w=420&h=420", label="Sticker 32"},
+    {url="rbxthumb://type=Asset&id=85186927570541&w=420&h=420", label="Sticker 33"},
+    {url="rbxthumb://type=Asset&id=104982476854875&w=420&h=420", label="Sticker 34"},
+    {url="rbxthumb://type=Asset&id=75855310731142&w=420&h=420", label="Sticker 35"},
+    {url="rbxthumb://type=Asset&id=15770267559&w=420&h=420", label="Sticker 36"},
+    {url="rbxthumb://type=Asset&id=5018114793&w=420&h=420", label="Sticker 37"},
+    {url="rbxthumb://type=Asset&id=15286481424&w=420&h=420", label="Sticker 38"},
+    {url="rbxthumb://type=Asset&id=128344314510489&w=420&h=420", label="Sticker 39"},
+    {url="rbxthumb://type=Asset&id=136067952747541&w=420&h=420", label="Sticker 40"},
+    {url="rbxthumb://type=Asset&id=99958778133344&w=420&h=420", label="Sticker 41"},
+    {url="rbxthumb://type=Asset&id=119529499&w=420&h=420", label="Sticker 42"},
+    {url="rbxthumb://type=Asset&id=87410449404372&w=420&h=420", label="Sticker 43"},
+    {url="rbxthumb://type=Asset&id=135626579756980&w=420&h=420", label="Sticker 44"},
+    {url="rbxthumb://type=Asset&id=139957369535197&w=420&h=420", label="Sticker 45"},
+    {url="rbxthumb://type=Asset&id=76041428119690&w=420&h=420", label="Sticker 46"},
+    {url="rbxthumb://type=Asset&id=121519423315170&w=420&h=420", label="Sticker 47"},
+    {url="rbxthumb://type=Asset&id=93373631313287&w=420&h=420", label="Sticker 48"},
+    {url="rbxthumb://type=Asset&id=97394539876577&w=420&h=420", label="Sticker 49"},
+    {url="rbxthumb://type=Asset&id=101940253916665&w=420&h=420", label="Sticker 50"},
+    {url="rbxthumb://type=Asset&id=78230203607312&w=420&h=420", label="Sticker 51"},
+    {url="rbxthumb://type=Asset&id=80353264115457&w=420&h=420", label="Sticker 52"},
+    {url="rbxthumb://type=Asset&id=101341480444341&w=420&h=420", label="Sticker 53"},
+    {url="rbxthumb://type=Asset&id=137764081130069&w=420&h=420", label="Sticker 54"},
+    {url="rbxthumb://type=Asset&id=129411122687899&w=420&h=420", label="Sticker 55"},
+    {url="rbxthumb://type=Asset&id=108586661676568&w=420&h=420", label="Sticker 56"},
+    {url="rbxthumb://type=Asset&id=139170316377078&w=420&h=420", label="Sticker 57"},
+    {url="rbxthumb://type=Asset&id=131387856318248&w=420&h=420", label="Sticker 58"},
+    {url="rbxthumb://type=Asset&id=85031627481050&w=420&h=420", label="Sticker 59"},
+    {url="rbxthumb://type=Asset&id=90949982441987&w=420&h=420", label="Sticker 60"},
+    {url="rbxthumb://type=Asset&id=123566128421906&w=420&h=420", label="Sticker 61"},
+}
+
+-- Sounds Setup
+local msgSound = Instance.new("Sound")
+msgSound.Name = "ZaNeMsgSound"
+msgSound.SoundId = "rbxassetid://131661992591924"
+msgSound.Volume = 1.5
+msgSound.Parent = SoundService
+
+local function playNotificationSound()
+    if soundEnabled and not isInitialLoad then
+        msgSound:Play()
+    end
+end
+
+-- Audio System Setup
+local soundGroup = SoundService:FindFirstChild("ZaNeBoostGroup") or Instance.new("SoundGroup")
+soundGroup.Name = "ZaNeBoostGroup"
+soundGroup.Volume = currentGlobalVolume
+soundGroup.Parent = SoundService
+
+local globalSound = SoundService:FindFirstChild("ZaNeGlobalMusic") or Instance.new("Sound")
+globalSound.Name = "ZaNeGlobalMusic"
+globalSound.Volume = currentGlobalVolume
+globalSound.Looped = true
+globalSound.SoundGroup = soundGroup
+globalSound.Parent = SoundService
+globalSound:Stop()
+
+-- Theme Engine
+local function getThemeColors(hue, darkMode)
+    if darkMode then
+        return {
+            WIN = Color3.fromHSV(hue, 0.5, 0.1),
+            BG2 = Color3.fromHSV(hue, 0.5, 0.15),
+            BG3 = Color3.fromHSV(hue, 0.5, 0.25),
+            TABBAR = Color3.fromHSV(hue, 0.6, 0.08),
+            INPUT = Color3.fromHSV(hue, 0.5, 0.12),
+            ACCENT = Color3.fromHSV(hue, 0.9, 1.0),
+            WINOUT = Color3.fromHSV(hue, 0.8, 0.7),
+            SYSBG = Color3.fromHSV(hue, 0.7, 0.2),
+            SYSTXT = Color3.fromHSV((hue + 0.5) % 1, 0.9, 1.0),
+            WHITE = Color3.fromRGB(245, 240, 255),
+            GRAY = Color3.fromRGB(140, 120, 160),
+            THEM = Color3.fromHSV(hue, 0.4, 0.2)
+        }
+    else
+        return {
+            WIN = Color3.fromRGB(240, 240, 248),
+            BG2 = Color3.fromRGB(220, 220, 235),
+            BG3 = Color3.fromRGB(200, 200, 220),
+            TABBAR = Color3.fromRGB(210, 210, 228),
+            INPUT = Color3.fromRGB(255, 255, 255),
+            ACCENT = Color3.fromHSV(hue, 0.9, 0.8),
+            WINOUT = Color3.fromHSV(hue, 0.8, 0.5),
+            SYSBG = Color3.fromRGB(225, 220, 240),
+            SYSTXT = Color3.fromRGB(40, 20, 60),
+            WHITE = Color3.fromRGB(20, 20, 30),
+            GRAY = Color3.fromRGB(100, 90, 110),
+            THEM = Color3.fromRGB(225, 225, 240)
+        }
+    end
+end
+
+local C = getThemeColors(currentHue, isDarkMode)
+
+-- Dynamic Rainbow Engine
+local RgbLabels = {}
+RunService.RenderStepped:Connect(function()
+    local rainbowHue = (tick() % 3) / 3
+    local color = Color3.fromHSV(rainbowHue, 1, 1)
+    local hex = string.format("#%02X%02X%02X", math.floor(color.R * 255), math.floor(color.G * 255), math.floor(color.B * 255))
+    
+    for lbl, data in pairs(RgbLabels) do
+        if lbl and lbl.Parent then
+            if data.isImg then
+                lbl.Text = string.format("<font color=\"%s\"><b>%s</b></font> <b>%s</b>", hex, data.rankTitle, data.dispName)
+            else
+                lbl.Text = string.format("<font color=\"%s\"><b>%s</b></font> <b>%s:</b> %s", hex, data.rankTitle, data.dispName, data.msgText)
+            end
+        else
+            RgbLabels[lbl] = nil
+        end
+    end
+end)
+
+-- Overhead Character Bubbles
+local function showHeadBubble(senderIdentifier, text)
+    if not text or text == "" then return end
+    local targetPlr = nil
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Name:lower() == senderIdentifier:lower() or p.DisplayName:lower() == senderIdentifier:lower() or tostring(p.UserId) == tostring(senderIdentifier) then
+            targetPlr = p
+            break
+        end
+    end
+    if not targetPlr then return end
+
+    local char = targetPlr.Character or targetPlr.CharacterAdded:Wait()
+    local head = char:FindFirstChild("Head") or char:WaitForChild("Head", 2)
+    if not head then return end
+
+    local oldBB = head:FindFirstChild("ZaNeHeadBubble")
+    if oldBB then oldBB:Destroy() end
+
+    local bb = Instance.new("BillboardGui")
+    bb.Name = "ZaNeHeadBubble"
+    bb.Adornee = head
+    bb.Size = UDim2.new(0, 220, 0, 60)
+    bb.StudsOffset = Vector3.new(0, 3, 0)
+    bb.AlwaysOnTop = true
+    bb.MaxDistance = 150
+    bb.Parent = head
+
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 1, 0)
+    frame.BackgroundColor3 = Color3.fromRGB(18, 12, 28)
+    frame.BackgroundTransparency = 0.1
+    frame.Parent = bb
+    local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 10) c.Parent = frame
+    local s = Instance.new("UIStroke") s.Color = C.ACCENT s.Thickness = 2 s.Parent = frame
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, -12, 1, -12)
+    lbl.Position = UDim2.new(0, 6, 0, 6)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = text
+    lbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+    lbl.TextSize = 13
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextWrapped = true
+    lbl.Parent = frame
+
+    task.delay(4.5, function()
+        if bb and bb.Parent then
+            TweenSvc:Create(frame, TweenInfo.new(0.5), {BackgroundTransparency = 1}):Play()
+            TweenSvc:Create(lbl, TweenInfo.new(0.5), {TextTransparency = 1}):Play()
+            TweenSvc:Create(s, TweenInfo.new(0.5), {Transparency = 1}):Play()
+            task.wait(0.5)
+            bb:Destroy()
+        end
+    end)
+end
+
+-- ScreenGui Setup
+local TargetGui = CoreGui or PlayerGui
+if TargetGui:FindFirstChild("ZaNeReChAtGui") then TargetGui:FindFirstChild("ZaNeReChAtGui"):Destroy() end
+
+local Gui = Instance.new("ScreenGui")
+Gui.Name = "ZaNeReChAtGui"
+Gui.ResetOnSpawn = false
+Gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+Gui.IgnoreGuiInset = true
+Gui.Parent = TargetGui
+
+local ThemeableStrokes = {}
+local ThemeableFrames = {}
+
+local function corner(p,r) local c=Instance.new("UICorner") c.CornerRadius=UDim.new(0,r or 8) c.Parent=p end 
+local function stroke(p,col,t) local s=Instance.new("UIStroke") s.Color=col or C.WINOUT s.Thickness=t or 1 s.Parent=p table.insert(ThemeableStrokes, s) return s end 
+local function ll(p,dir,sp) local l=Instance.new("UIListLayout") l.FillDirection=dir or Enum.FillDirection.Vertical l.SortOrder=Enum.SortOrder.LayoutOrder l.Padding=UDim.new(0,sp or 4) l.Parent=p end 
+
+-- Drag System
+local dragTargets={} 
+local activeDrag=nil 
+local dragStart=Vector2.new() 
+local dragPos=UDim2.new() 
+
+local function makeDraggable(handle,target) 
+    if not handle or not target then return end 
+    table.insert(dragTargets,{h=handle,t=target}) 
+end 
+
+UIS.InputBegan:Connect(function(inp) 
+    if isLocked then return end
+    if inp.UserInputType~=Enum.UserInputType.MouseButton1 and inp.UserInputType~=Enum.UserInputType.Touch then return end 
+    local pos=Vector2.new(inp.Position.X,inp.Position.Y) 
+    for _,dt in ipairs(dragTargets) do 
+        if dt.h and dt.h.Parent then 
+            local a=dt.h.AbsolutePosition 
+            local s=dt.h.AbsoluteSize 
+            if pos.X>=a.X and pos.X<=a.X+s.X and pos.Y>=a.Y and pos.Y<=a.Y+s.Y then 
+                activeDrag=dt.t 
+                dragStart=pos 
+                dragPos=dt.t.Position 
+                break 
+            end 
+        end 
+    end 
+end) 
+
+UIS.InputChanged:Connect(function(inp) 
+    if not activeDrag or isLocked then return end 
+    if inp.UserInputType~=Enum.UserInputType.MouseMovement and inp.UserInputType~=Enum.UserInputType.Touch then return end 
+    local d=Vector2.new(inp.Position.X,inp.Position.Y)-dragStart 
+    activeDrag.Position=UDim2.new(dragPos.X.Scale,dragPos.X.Offset+d.X,dragPos.Y.Scale,dragPos.Y.Offset+d.Y) 
+end) 
+
+UIS.InputEnded:Connect(function(inp) 
+    if inp.UserInputType==Enum.UserInputType.MouseButton1 or inp.UserInputType==Enum.UserInputType.Touch then 
+        activeDrag=nil 
+    end 
+end) 
+
+-- Notification Toast System
+local NotifContainer = Instance.new("Frame")
+NotifContainer.Size = UDim2.new(0, 300, 1, 0)
+NotifContainer.Position = UDim2.new(1, -310, 0, 10)
+NotifContainer.BackgroundTransparency = 1
+NotifContainer.ZIndex = 1000
+NotifContainer.Parent = Gui
+ll(NotifContainer, Enum.FillDirection.Vertical, 6)
+
+local function sendBigWhiteNotification(msg)
+    if isInitialLoad then return end
+    
+    local toast = Instance.new("Frame")
+    toast.Size = UDim2.new(1, 0, 0, 42)
+    toast.BackgroundColor3 = Color3.fromRGB(250, 250, 255)
+    toast.ZIndex = 1001
+    toast.Parent = NotifContainer
+    corner(toast, 10)
+    
+    local tStroke = Instance.new("UIStroke")
+    tStroke.Color = Color3.fromRGB(180, 180, 210)
+    tStroke.Thickness = 1.5
+    tStroke.Parent = toast
+
+    local tText = Instance.new("TextLabel")
+    tText.Size = UDim2.new(1, -20, 1, 0)
+    tText.Position = UDim2.new(0, 10, 0, 0)
+    tText.BackgroundTransparency = 1
+    tText.Text = msg
+    tText.TextColor3 = Color3.fromRGB(20, 20, 30)
+    tText.TextSize = 12
+    tText.Font = Enum.Font.GothamBold
+    tText.TextXAlignment = Enum.TextXAlignment.Left
+    tText.ZIndex = 1002
+    tText.Parent = toast
+
+    task.delay(3.5, function()
+        if toast and toast.Parent then
+            TweenSvc:Create(toast, TweenInfo.new(0.5), {BackgroundTransparency = 1}):Play()
+            TweenSvc:Create(tText, TweenInfo.new(0.5), {TextTransparency = 1}):Play()
+            TweenSvc:Create(tStroke, TweenInfo.new(0.5), {Transparency = 1}):Play()
+            task.wait(0.5)
+            toast:Destroy()
+        end
+    end)
+end
+
+-- Startup Loading Screen
+local LoadingFrame = Instance.new("Frame")
+LoadingFrame.Size = UDim2.new(0, 320, 0, 180)
+LoadingFrame.Position = UDim2.new(0.5, -160, 0.5, -90)
+LoadingFrame.BackgroundColor3 = C.WIN
+LoadingFrame.ZIndex = 2000
+LoadingFrame.Parent = Gui
+corner(LoadingFrame, 16)
+stroke(LoadingFrame, C.ACCENT, 2)
+
+local LoadTitle = Instance.new("TextLabel")
+LoadTitle.Size = UDim2.new(1, 0, 0, 40)
+LoadTitle.Position = UDim2.new(0, 0, 0, 25)
+LoadTitle.BackgroundTransparency = 1
+LoadTitle.Text = "⚡ ZaNe ReChAt v5.1 ⚡"
+LoadTitle.TextColor3 = C.WHITE
+LoadTitle.TextSize = 18
+LoadTitle.Font = Enum.Font.GothamBold
+LoadTitle.ZIndex = 2001
+LoadTitle.Parent = LoadingFrame
+
+local LoadStatus = Instance.new("TextLabel")
+LoadStatus.Size = UDim2.new(1, 0, 0, 20)
+LoadStatus.Position = UDim2.new(0, 0, 0, 70)
+LoadStatus.BackgroundTransparency = 1
+LoadStatus.Text = "Loading Server Chat modules..."
+LoadStatus.TextColor3 = C.GRAY
+LoadStatus.TextSize = 11
+LoadStatus.Font = Enum.Font.Gotham
+LoadStatus.ZIndex = 2001
+LoadStatus.Parent = LoadingFrame
+
+local BarBG = Instance.new("Frame")
+BarBG.Size = UDim2.new(0.8, 0, 0, 10)
+BarBG.Position = UDim2.new(0.1, 0, 0, 115)
+BarBG.BackgroundColor3 = C.BG2
+BarBG.ZIndex = 2001
+BarBG.Parent = LoadingFrame
+corner(BarBG, 5)
+
+local BarFill = Instance.new("Frame")
+BarFill.Size = UDim2.new(0, 0, 1, 0)
+BarFill.BackgroundColor3 = C.ACCENT
+BarFill.ZIndex = 2002
+BarFill.Parent = BarBG
+corner(BarFill, 5)
+
+-- Floating Toggle Bubble
+local BubFrame=Instance.new("Frame")
+BubFrame.Size=UDim2.new(0,50,0,50)
+BubFrame.Position=UDim2.new(1,-60,1,-85)
+BubFrame.BackgroundColor3=C.WIN
+BubFrame.ZIndex=800
+BubFrame.Parent=Gui
+corner(BubFrame,25) 
+stroke(BubFrame,C.ACCENT,1.5) 
+
+local BubBtn=Instance.new("TextButton")
+BubBtn.Size=UDim2.new(1,0,1,0)
+BubBtn.BackgroundTransparency=1
+BubBtn.Text="⚡"
+BubBtn.TextSize=22
+BubBtn.TextColor3=C.WHITE
+BubBtn.ZIndex=801
+BubBtn.Parent=BubFrame
+makeDraggable(BubFrame,BubFrame) 
+
+-- Main Chat Window Frame
+local Win=Instance.new("Frame")
+Win.Name="ZaNeReChAtWin"
+Win.Size = UDim2.new(0,430,0,380)
+Win.Position = UDim2.new(0.5,-215,0.5,-175)
+Win.BackgroundColor3=C.WIN
+Win.Visible=false
+Win.ZIndex=500
+Win.Parent=Gui
+corner(Win,12) 
+stroke(Win,C.WINOUT,1.5) 
+table.insert(ThemeableFrames, Win)
+
+-- Header Bar
+local TopBanner = Instance.new("Frame")
+TopBanner.Size = UDim2.new(1, 0, 0, 26)
+TopBanner.BackgroundColor3 = C.TABBAR
+TopBanner.ZIndex = 501
+TopBanner.Parent = Win
+corner(TopBanner, 12)
+
+local TopTitleLabel = Instance.new("TextLabel")
+TopTitleLabel.Size = UDim2.new(1, -95, 1, 0)
+TopTitleLabel.Position = UDim2.new(0, 10, 0, 0)
+TopTitleLabel.BackgroundTransparency = 1
+TopTitleLabel.Text = "⚡ ZaNe ReChAt v5.1 [SERVER] ⚡"
+TopTitleLabel.TextColor3 = C.WHITE
+TopTitleLabel.TextSize = 12
+TopTitleLabel.Font = Enum.Font.GothamBold
+TopTitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+TopTitleLabel.ZIndex = 502
+TopTitleLabel.Parent = TopBanner
+
+makeDraggable(TopBanner, Win)
+
+local XBtn=Instance.new("TextButton")
+XBtn.Size=UDim2.new(0,20,0,20)
+XBtn.Position=UDim2.new(1,-25,0,3)
+XBtn.BackgroundColor3=Color3.fromRGB(255,45,85)
+XBtn.Text="✖"
+XBtn.TextColor3=Color3.fromRGB(255,255,255)
+XBtn.TextSize=10
+XBtn.Font=Enum.Font.GothamBold
+XBtn.ZIndex=503
+XBtn.Parent=Win
+corner(XBtn,5) 
+
+local LockBtn=Instance.new("TextButton")
+LockBtn.Size=UDim2.new(0,20,0,20)
+LockBtn.Position=UDim2.new(1,-48,0,3)
+LockBtn.BackgroundColor3=C.BG3
+LockBtn.Text="🔓"
+LockBtn.TextColor3=C.WHITE
+LockBtn.TextSize=10
+LockBtn.Font=Enum.Font.GothamBold
+LockBtn.ZIndex=503
+LockBtn.Parent=Win
+corner(LockBtn,5) 
+stroke(LockBtn, C.ACCENT, 1)
+
+local ThemeToggleBtn = Instance.new("TextButton")
+ThemeToggleBtn.Size = UDim2.new(0, 20, 0, 20)
+ThemeToggleBtn.Position = UDim2.new(1, -71, 0, 3)
+ThemeToggleBtn.BackgroundColor3 = C.BG3
+ThemeToggleBtn.Text = "🌙"
+ThemeToggleBtn.TextColor3 = C.WHITE
+ThemeToggleBtn.TextSize = 10
+ThemeToggleBtn.Font = Enum.Font.GothamBold
+ThemeToggleBtn.ZIndex = 503
+ThemeToggleBtn.Parent = Win
+corner(ThemeToggleBtn, 5)
+stroke(ThemeToggleBtn, C.ACCENT, 1)
+
+local function updateThemeUI()
+    C = getThemeColors(currentHue, isDarkMode)
+    Win.BackgroundColor3 = C.WIN
+    TopBanner.BackgroundColor3 = C.TABBAR
+    TopTitleLabel.TextColor3 = C.WHITE
+    ThemeToggleBtn.Text = isDarkMode and "🌙" or "☀️"
+    for _, s in ipairs(ThemeableStrokes) do pcall(function() s.Color = C.WINOUT end) end
+    for _, f in ipairs(ThemeableFrames) do pcall(function() f.BackgroundColor3 = C.WIN end) end
+end
+
+ThemeToggleBtn.MouseButton1Click:Connect(function()
+    isDarkMode = not isDarkMode
+    updateThemeUI()
+end)
+
+LockBtn.MouseButton1Click:Connect(function()
+    isLocked = not isLocked
+    LockBtn.Text = isLocked and "🔒" or "🔓"
+    LockBtn.BackgroundColor3 = isLocked and Color3.fromRGB(200, 50, 50) or C.BG3
+end)
+
+-- Tab Controller Setup
+local TabBar=Instance.new("Frame")
+TabBar.Size=UDim2.new(1,0,0,32)
+TabBar.Position=UDim2.new(0,0,0,26)
+TabBar.BackgroundColor3=C.WIN
+TabBar.ZIndex=501
+TabBar.Parent=Win
+
+local TabScroll=Instance.new("ScrollingFrame")
+TabScroll.Size=UDim2.new(1,-10,1,0)
+TabScroll.Position=UDim2.new(0,5,0,0)
+TabScroll.BackgroundTransparency=1
+TabScroll.ScrollBarThickness=0
+TabScroll.CanvasSize=UDim2.new(0,0,0,0)
+TabScroll.AutomaticCanvasSize=Enum.AutomaticSize.X
+TabScroll.ZIndex=502
+TabScroll.Parent=TabBar
+ll(TabScroll,Enum.FillDirection.Horizontal,4) 
+
+local TABS={{name="SERVER",icon="💬"},{name="STICKERS",icon="🖼️"},{name="THEMES",icon="🎨"},{name="PFP",icon="👤"}} 
+if canControlGlobalMusic(PlayerName) then
+    table.insert(TABS, {name="MUSIC", icon="🎵"})
+end
+local tabBtns={} 
+for i,t in ipairs(TABS) do 
+    local btn=Instance.new("TextButton")
+    btn.Size=UDim2.new(0,80,1,0)
+    btn.BackgroundTransparency=1
+    btn.Text=t.icon.." "..t.name
+    btn.TextSize=10
+    btn.Font=Enum.Font.GothamBold
+    btn.TextColor3=C.GRAY
+    btn.ZIndex=503
+    btn.LayoutOrder=i
+    btn.Parent=TabScroll
+    
+    local ul=Instance.new("Frame")
+    ul.Size=UDim2.new(0,35,0,2)
+    ul.Position=UDim2.new(0.5,-17,1,-2)
+    ul.BackgroundColor3=C.ACCENT
+    ul.BackgroundTransparency=1
+    ul.ZIndex=503
+    ul.Parent=btn
+    
+    tabBtns[t.name]={b=btn,ul=ul} 
+end 
+
+local Content=Instance.new("Frame")
+Content.Size=UDim2.new(1,0,1,-58)
+Content.Position=UDim2.new(0,0,0,58)
+Content.BackgroundTransparency=1
+Content.ClipsDescendants=true
+Content.ZIndex=501
+Content.Parent=Win
+
+-- Server View Page
+local SrvPage=Instance.new("Frame")
+SrvPage.Size=UDim2.new(1,0,1,0)
+SrvPage.BackgroundTransparency=1
+SrvPage.ZIndex=501
+SrvPage.Parent=Content
+
+local MsgScroll=Instance.new("ScrollingFrame")
+MsgScroll.Size=UDim2.new(1,-6,1,-48)
+MsgScroll.Position=UDim2.new(0,3,0,3)
+MsgScroll.BackgroundTransparency=1
+MsgScroll.ScrollBarThickness=3
+MsgScroll.ScrollBarImageColor3=C.ACCENT
+MsgScroll.CanvasSize=UDim2.new(0,0,0,0)
+MsgScroll.AutomaticCanvasSize=Enum.AutomaticSize.Y
+MsgScroll.ZIndex=502
+MsgScroll.Parent=SrvPage
+local UIListLayout = Instance.new("UIListLayout")
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+UIListLayout.Padding = UDim.new(0, 6)
+UIListLayout.Parent = MsgScroll
+
+-- DMs Page UI
+local DmPage = Instance.new("Frame")
+DmPage.Size = UDim2.new(1, 0, 1, 0)
+DmPage.BackgroundTransparency = 1
+DmPage.Visible = false
+DmPage.ZIndex = 501
+DmPage.Parent = Content
+
+-- DM Side User Selector Frame
+local DmUserList = Instance.new("ScrollingFrame")
+DmUserList.Size = UDim2.new(0, 110, 1, -6)
+DmUserList.Position = UDim2.new(0, 3, 0, 3)
+DmUserList.BackgroundColor3 = C.BG2
+DmUserList.ScrollBarThickness = 2
+DmUserList.CanvasSize = UDim2.new(0, 0, 0, 0)
+DmUserList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+DmUserList.ZIndex = 502
+DmUserList.Parent = DmPage
+corner(DmUserList, 8)
+local DmListLayout = Instance.new("UIListLayout")
+DmListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+DmListLayout.Padding = UDim.new(0, 4)
+DmListLayout.Parent = DmUserList
+
+-- DM Chat Area Container
+local DmChatFrame = Instance.new("Frame")
+DmChatFrame.Size = UDim2.new(1, -120, 1, 0)
+DmChatFrame.Position = UDim2.new(0, 116, 0, 0)
+DmChatFrame.BackgroundTransparency = 1
+DmChatFrame.ZIndex = 502
+DmChatFrame.Parent = DmPage
+
+local DmHeader = Instance.new("TextLabel")
+DmHeader.Size = UDim2.new(1, -6, 0, 20)
+DmHeader.Position = UDim2.new(0, 3, 0, 3)
+DmHeader.BackgroundColor3 = C.BG3
+DmHeader.Text = " Select a user to start private chat"
+DmHeader.TextColor3 = C.WHITE
+DmHeader.TextSize = 10
+DmHeader.Font = Enum.Font.GothamBold
+DmHeader.TextXAlignment = Enum.TextXAlignment.Left
+DmHeader.ZIndex = 503
+DmHeader.Parent = DmChatFrame
+corner(DmHeader, 6)
+
+local DmReplyPreviewFrame = Instance.new("Frame")
+DmReplyPreviewFrame.Size = UDim2.new(1, -6, 0, 18)
+DmReplyPreviewFrame.Position = UDim2.new(0, 3, 0, 26)
+DmReplyPreviewFrame.BackgroundColor3 = C.BG3
+DmReplyPreviewFrame.Visible = false
+DmReplyPreviewFrame.ZIndex = 503
+DmReplyPreviewFrame.Parent = DmChatFrame
+corner(DmReplyPreviewFrame, 5)
+local DmReplyPreviewText = Instance.new("TextLabel")
+DmReplyPreviewText.Size = UDim2.new(1, -28, 1, 0)
+DmReplyPreviewText.Position = UDim2.new(0, 6, 0, 0)
+DmReplyPreviewText.BackgroundTransparency = 1
+DmReplyPreviewText.Text = ""
+DmReplyPreviewText.TextColor3 = C.GRAY
+DmReplyPreviewText.TextSize = 9
+DmReplyPreviewText.Font = Enum.Font.Gotham
+DmReplyPreviewText.TextTruncate = Enum.TextTruncate.AtEnd
+DmReplyPreviewText.TextXAlignment = Enum.TextXAlignment.Left
+DmReplyPreviewText.ZIndex = 504
+DmReplyPreviewText.Parent = DmReplyPreviewFrame
+local CancelDmReplyBtn = Instance.new("TextButton")
+CancelDmReplyBtn.Size = UDim2.new(0, 18, 0, 18)
+CancelDmReplyBtn.Position = UDim2.new(1, -20, 0, 0)
+CancelDmReplyBtn.BackgroundTransparency = 1
+CancelDmReplyBtn.Text = "✖"
+CancelDmReplyBtn.TextColor3 = Color3.fromRGB(255, 80, 80)
+CancelDmReplyBtn.TextSize = 9
+CancelDmReplyBtn.Font = Enum.Font.GothamBold
+CancelDmReplyBtn.ZIndex = 504
+CancelDmReplyBtn.Parent = DmReplyPreviewFrame
+CancelDmReplyBtn.MouseButton1Click:Connect(function()
+    dmReplyingTo = nil
+    DmReplyPreviewFrame.Visible = false
+end)
+local function startDMReply(sender, text)
+    dmReplyingTo = {sender = sender, text = text}
+    DmReplyPreviewText.Text = "↩ Replying to @" .. tostring(sender) .. ": " .. tostring(text or "")
+    DmReplyPreviewFrame.Visible = true
+end
+
+local DmMsgScroll = Instance.new("ScrollingFrame")
+DmMsgScroll.Size = UDim2.new(1, -6, 1, -91)
+DmMsgScroll.Position = UDim2.new(0, 3, 0, 48)
+DmMsgScroll.BackgroundTransparency = 1
+DmMsgScroll.ScrollBarThickness = 3
+DmMsgScroll.ScrollBarImageColor3 = C.ACCENT
+DmMsgScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+DmMsgScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+DmMsgScroll.ZIndex = 502
+DmMsgScroll.Parent = DmChatFrame
+local DmScrollLayout = Instance.new("UIListLayout")
+DmScrollLayout.SortOrder = Enum.SortOrder.LayoutOrder
+DmScrollLayout.Padding = UDim.new(0, 6)
+DmScrollLayout.Parent = DmMsgScroll
+
+local DmIBar = Instance.new("Frame")
+DmIBar.Size = UDim2.new(1, -6, 0, 36)
+DmIBar.Position = UDim2.new(0, 3, 1, -40)
+DmIBar.BackgroundColor3 = C.INPUT
+DmIBar.ZIndex = 503
+DmIBar.Parent = DmChatFrame
+corner(DmIBar, 18)
+stroke(DmIBar, C.WINOUT, 1)
+
+local DmInput = Instance.new("TextBox")
+DmInput.Size = UDim2.new(1, -45, 1, -4)
+DmInput.Position = UDim2.new(0, 10, 0, 2)
+DmInput.BackgroundTransparency = 1
+DmInput.PlaceholderText = "Type private message..."
+DmInput.PlaceholderColor3 = C.GRAY
+DmInput.Text = ""
+DmInput.TextColor3 = C.WHITE
+DmInput.TextSize = 11
+DmInput.Font = Enum.Font.Gotham
+DmInput.TextXAlignment = Enum.TextXAlignment.Left
+DmInput.ClearTextOnFocus = false
+DmInput.ZIndex = 504
+DmInput.Parent = DmIBar
+
+local DmSBtn = Instance.new("TextButton")
+DmSBtn.Size = UDim2.new(0, 28, 0, 28)
+DmSBtn.Position = UDim2.new(1, -31, 0.5, -14)
+DmSBtn.BackgroundColor3 = C.ACCENT
+DmSBtn.Text = "↑"
+DmSBtn.TextColor3 = C.WHITE
+DmSBtn.TextSize = 14
+DmSBtn.Font = Enum.Font.GothamBold
+DmSBtn.ZIndex = 504
+DmSBtn.Parent = DmIBar
+corner(DmSBtn, 14)
+
+-- PFP Tab
+local PFPPage = createPFPTab(Content)
+
+local function refreshUserAvatars()
+    for _, msgFrame in pairs(messageFrames) do
+        if msgFrame and msgFrame.Parent then
+            local msgContent = msgFrame:FindFirstChild("Frame")
+            if msgContent then
+                local avatarBtn = msgContent:FindFirstChild("ImageButton")
+                if avatarBtn and avatarBtn.Name == "AvatarButton" then
+                    local userId = avatarBtn:GetAttribute("UserId")
+                    if userId then
+                        local pfpURL = getUserPFP(userId)
+                        if pfpURL then
+                            avatarBtn.Image = pfpURL
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+task.spawn(function()
+    while task.wait(5) do
+        refreshUserAvatars()
+    end
+end)
+
+-- Forward declaration of addMsg
+local addMsg
+
+local function loadDMHistoryForTarget(targetPlayer)
+    for _, oldMsg in ipairs(DmMsgScroll:GetChildren()) do
+        if not oldMsg:IsA("UIListLayout") then oldMsg:Destroy() end
+    end
+
+    if not targetPlayer then return end
+
+    local dmKey = getDMChannelKey(UserId, targetPlayer.UserId)
+    if not processedDMs[dmKey] then processedDMs[dmKey] = {} end
+
+    task.spawn(function()
+        local dmData = getFirebaseData("dm_channels/" .. dmKey)
+        if dmData and currentDMTarget == targetPlayer then
+            for id, msg in pairs(dmData) do
+                processedDMs[dmKey][id] = true
+                addMsg(msg.Sender or msg.sender, msg.DisplayName or msg.sender, msg.Text or "", DmMsgScroll, false, nil, msg.UserId, id, msg.replyData, nil, true)
+            end
+        end
+    end)
+end
+
+local function refreshDmUserList()
+    local isTargetStillInServer = false
+
+    for _, child in ipairs(DmUserList:GetChildren()) do
+        if child:IsA("TextButton") then child:Destroy() end
+    end
+
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= Player then
+            if currentDMTarget and p == currentDMTarget then
+                isTargetStillInServer = true
+            end
+
+            local uBtn = Instance.new("TextButton")
+            uBtn.Size = UDim2.new(1, -6, 0, 28)
+            uBtn.Position = UDim2.new(0, 3, 0, 0)
+            uBtn.BackgroundColor3 = (currentDMTarget and currentDMTarget == p) and C.ACCENT or C.BG3
+            uBtn.Text = " 👤 " .. (p.DisplayName ~= "" and p.DisplayName or p.Name)
+            uBtn.TextColor3 = C.WHITE
+            uBtn.TextSize = 10
+            uBtn.Font = Enum.Font.GothamBold
+            uBtn.TextXAlignment = Enum.TextXAlignment.Left
+            uBtn.TextTruncate = Enum.TextTruncate.AtEnd
+            uBtn.ZIndex = 503
+            uBtn.Parent = DmUserList
+            corner(uBtn, 6)
+
+            uBtn.MouseButton1Click:Connect(function()
+                if currentDMTarget ~= p then
+                    dmReplyingTo = nil
+                    DmReplyPreviewFrame.Visible = false
+                end
+                currentDMTarget = p
+                DmHeader.Text = " 🔒 Chatting with @" .. p.Name
+                for _, btn in ipairs(DmUserList:GetChildren()) do
+                    if btn:IsA("TextButton") then btn.BackgroundColor3 = C.BG3 end
+                end
+                uBtn.BackgroundColor3 = C.ACCENT
+                loadDMHistoryForTarget(p)
+            end)
+        end
+    end
+
+    if currentDMTarget and not isTargetStillInServer then
+        currentDMTarget = nil
+        dmReplyingTo = nil
+        DmReplyPreviewFrame.Visible = false
+        DmHeader.Text = " Select a user to start private chat"
+        for _, oldMsg in ipairs(DmMsgScroll:GetChildren()) do
+            if not oldMsg:IsA("UIListLayout") then oldMsg:Destroy() end
+        end
+    end
+end
+
+Players.PlayerAdded:Connect(refreshDmUserList)
+Players.PlayerRemoving:Connect(refreshDmUserList)
+refreshDmUserList()
+
+-- Reply Preview Bar
+local ReplyPreviewFrame = Instance.new("Frame")
+ReplyPreviewFrame.Size = UDim2.new(1, -8, 0, 24)
+ReplyPreviewFrame.Position = UDim2.new(0, 4, 1, -66)
+ReplyPreviewFrame.BackgroundColor3 = C.BG3
+ReplyPreviewFrame.Visible = false
+ReplyPreviewFrame.ZIndex = 503
+ReplyPreviewFrame.Parent = SrvPage
+corner(ReplyPreviewFrame, 6)
+
+local ReplyPreviewText = Instance.new("TextLabel")
+ReplyPreviewText.Size = UDim2.new(1, -30, 1, 0)
+ReplyPreviewText.Position = UDim2.new(0, 6, 0, 0)
+ReplyPreviewText.BackgroundTransparency = 1
+ReplyPreviewText.Text = ""
+ReplyPreviewText.TextColor3 = C.GRAY
+ReplyPreviewText.TextSize = 10
+ReplyPreviewText.Font = Enum.Font.Gotham
+ReplyPreviewText.TextXAlignment = Enum.TextXAlignment.Left
+ReplyPreviewText.TextTruncate = Enum.TextTruncate.AtEnd
+ReplyPreviewText.ZIndex = 504
+ReplyPreviewText.Parent = ReplyPreviewFrame
+
+local CancelReplyBtn = Instance.new("TextButton")
+CancelReplyBtn.Size = UDim2.new(0, 18, 0, 18)
+CancelReplyBtn.Position = UDim2.new(1, -22, 0.5, -9)
+CancelReplyBtn.BackgroundTransparency = 1
+CancelReplyBtn.Text = "✖"
+CancelReplyBtn.TextColor3 = Color3.fromRGB(255, 80, 80)
+CancelReplyBtn.TextSize = 10
+CancelReplyBtn.Font = Enum.Font.GothamBold
+CancelReplyBtn.ZIndex = 504
+CancelReplyBtn.Parent = ReplyPreviewFrame
+
+CancelReplyBtn.MouseButton1Click:Connect(function()
+    replyingToMsg = nil
+    ReplyPreviewFrame.Visible = false
+    MsgScroll.Size = UDim2.new(1, -6, 1, -48)
+    sendBigWhiteNotification("❌ Reply cancelled")
+end)
+
+-- Main Message Input Bar
+local IBar=Instance.new("Frame")
+IBar.Size=UDim2.new(1,-8,0,38)
+IBar.Position=UDim2.new(0,4,1,-42)
+IBar.BackgroundColor3=C.INPUT
+IBar.ZIndex=503
+IBar.Parent=SrvPage
+corner(IBar,19) 
+stroke(IBar,C.WINOUT,1) 
+
+local CamBtn=Instance.new("TextButton")
+CamBtn.Size=UDim2.new(0,28,0,28)
+CamBtn.Position=UDim2.new(0,5,0.5,-14)
+CamBtn.BackgroundColor3=C.BG3
+CamBtn.Text="📷"
+CamBtn.TextColor3=C.WHITE
+CamBtn.TextSize=14
+CamBtn.ZIndex=504
+CamBtn.Parent=IBar
+corner(CamBtn,14)
+
+local CInput=Instance.new("TextBox")
+CInput.Size=UDim2.new(1,-80,1,-4)
+CInput.Position=UDim2.new(0,38,0,2)
+CInput.BackgroundTransparency=1
+CInput.PlaceholderText="Server Chat or /help..."
+CInput.PlaceholderColor3=C.GRAY
+CInput.Text=""
+CInput.TextColor3=C.WHITE
+CInput.TextSize=12
+CInput.Font=Enum.Font.Gotham
+CInput.TextXAlignment=Enum.TextXAlignment.Left
+CInput.ClearTextOnFocus=false
+CInput.ZIndex=504
+CInput.Parent=IBar
+
+local SBtn=Instance.new("TextButton")
+SBtn.Size=UDim2.new(0,32,0,32)
+SBtn.Position=UDim2.new(1,-35,0.5,-16)
+SBtn.BackgroundColor3=C.ACCENT
+SBtn.Text="↑"
+SBtn.TextColor3=C.WHITE
+SBtn.TextSize=16
+SBtn.Font=Enum.Font.GothamBold
+SBtn.ZIndex=504
+SBtn.Parent=IBar
+corner(SBtn,16) 
+
+-- Context Menu
+local ContextMenu = Instance.new("Frame")
+ContextMenu.Size = UDim2.new(0, 190, 0, 0)
+ContextMenu.AutomaticSize = Enum.AutomaticSize.Y
+ContextMenu.BackgroundColor3 = C.BG2
+ContextMenu.Visible = false
+ContextMenu.ZIndex = 980
+ContextMenu.Parent = SrvPage
+corner(ContextMenu, 10)
+stroke(ContextMenu, C.ACCENT, 1.5)
+
+local ContextList = Instance.new("UIListLayout")
+ContextList.SortOrder = Enum.SortOrder.LayoutOrder
+ContextList.Padding = UDim.new(0, 4)
+ContextList.Parent = ContextMenu
+
+local function createContextMenuBtn(text, onClick)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, -12, 0, 28)
+    btn.Position = UDim2.new(0, 6, 0, 0)
+    btn.BackgroundColor3 = C.BG3
+    btn.Text = text
+    btn.TextColor3 = C.WHITE
+    btn.TextSize = 11
+    btn.Font = Enum.Font.GothamBold
+    btn.ZIndex = 981
+    btn.Parent = ContextMenu
+    corner(btn, 6)
+    btn.MouseButton1Click:Connect(function()
+        ContextMenu.Visible = false
+        if onClick then onClick() end
+    end)
+    return btn
+end
+
+-- ============================================================
+-- REACTION PICKER - 5 EMOJIS ONLY
+-- ============================================================
+local ReactionPicker = Instance.new("Frame")
+ReactionPicker.Size = UDim2.new(0, 280, 0, 100)
+ReactionPicker.BackgroundColor3 = C.BG2
+ReactionPicker.Visible = false
+ReactionPicker.ZIndex = 990
+ReactionPicker.Parent = SrvPage
+corner(ReactionPicker, 16)
+stroke(ReactionPicker, C.ACCENT, 2)
+
+-- Reaction Title
+local ReactionTitle = Instance.new("TextLabel")
+ReactionTitle.Size = UDim2.new(1, 0, 0, 25)
+ReactionTitle.Position = UDim2.new(0, 0, 0, 5)
+ReactionTitle.BackgroundTransparency = 1
+ReactionTitle.Text = "😃 CHOOSE A REACTION"
+ReactionTitle.TextColor3 = C.WHITE
+ReactionTitle.TextSize = 12
+ReactionTitle.Font = Enum.Font.GothamBold
+ReactionTitle.ZIndex = 991
+ReactionTitle.Parent = ReactionPicker
+
+-- Reaction Grid
+local ReactionGrid = Instance.new("UIGridLayout")
+ReactionGrid.CellSize = UDim2.new(0, 50, 0, 50)
+ReactionGrid.CellPadding = UDim2.new(0, 8, 0, 8)
+ReactionGrid.HorizontalAlignment = Enum.HorizontalAlignment.Center
+ReactionGrid.VerticalAlignment = Enum.VerticalAlignment.Center
+ReactionGrid.SortOrder = Enum.SortOrder.LayoutOrder
+ReactionGrid.Parent = ReactionPicker
+
+-- ONLY 5 EMOJIS
+local EMOJIS = {"🤡", "😂", "🔥", "😮", "❤️"}
+
+local targetReactionMsgId = nil
+
+for i, emo in ipairs(EMOJIS) do
+    local btn = Instance.new("TextButton")
+    btn.Name = "ReactionBtn_" .. i
+    btn.Size = UDim2.new(0, 48, 0, 48)
+    btn.BackgroundColor3 = C.BG3
+    btn.BackgroundTransparency = 0.3
+    btn.Text = emo
+    btn.TextSize = 26
+    btn.ZIndex = 991
+    btn.Parent = ReactionPicker
+    corner(btn, 10)
+    
+    -- Hover effect
+    btn.MouseEnter:Connect(function()
+        TweenSvc:Create(btn, TweenInfo.new(0.15), {BackgroundTransparency = 0}):Play()
+        TweenSvc:Create(btn, TweenInfo.new(0.15), {TextSize = 32}):Play()
+    end)
+    
+    btn.MouseLeave:Connect(function()
+        TweenSvc:Create(btn, TweenInfo.new(0.15), {BackgroundTransparency = 0.3}):Play()
+        TweenSvc:Create(btn, TweenInfo.new(0.15), {TextSize = 26}):Play()
+    end)
+    
+    btn.MouseButton1Click:Connect(function()
+        if targetReactionMsgId then
+            patchFirebaseData("servers/" .. SERVER_KEY .. "/messages/" .. targetReactionMsgId, {reaction = emo})
+            ReactionPicker.Visible = false
+            sendBigWhiteNotification("✅ Reacted with " .. emo)
+            targetReactionMsgId = nil
+        end
+    end)
+end
+
+-- Close button for reaction picker
+local CloseReactionBtn = Instance.new("TextButton")
+CloseReactionBtn.Size = UDim2.new(0, 25, 0, 25)
+CloseReactionBtn.Position = UDim2.new(1, -30, 0, 5)
+CloseReactionBtn.BackgroundTransparency = 1
+CloseReactionBtn.Text = "✖"
+CloseReactionBtn.TextColor3 = Color3.fromRGB(255, 80, 80)
+CloseReactionBtn.TextSize = 14
+CloseReactionBtn.Font = Enum.Font.GothamBold
+CloseReactionBtn.ZIndex = 992
+CloseReactionBtn.Parent = ReactionPicker
+
+CloseReactionBtn.MouseButton1Click:Connect(function()
+    ReactionPicker.Visible = false
+    targetReactionMsgId = nil
+end)
+
+-- Close menus when clicking outside
+UIS.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+        local pos = input.Position
+        if ContextMenu.Visible then
+            local p = ContextMenu.AbsolutePosition
+            local s = ContextMenu.AbsoluteSize
+            if pos.X < p.X or pos.X > p.X + s.X or pos.Y < p.Y or pos.Y > p.Y + s.Y then
+                ContextMenu.Visible = false
+            end
+        end
+        if ReactionPicker.Visible then
+            local p = ReactionPicker.AbsolutePosition
+            local s = ReactionPicker.AbsoluteSize
+            if pos.X < p.X or pos.X > p.X + s.X or pos.Y < p.Y or pos.Y > p.Y + s.Y then
+                ReactionPicker.Visible = false
+                targetReactionMsgId = nil
+            end
+        end
+    end
+end)
+
+local switchTab = function(name) end
+
+local function openHoldMenu(msgId, sender, dispName, text, bubFrame, isPrivate)
+    if not msgId then return end
+    
+    ContextMenu.Visible = false
+    ReactionPicker.Visible = false
+    for _, child in ipairs(ContextMenu:GetChildren()) do
+        if child:IsA("TextButton") then child:Destroy() end
+    end
+
+    local isOwn = (sender == PlayerName)
+    local posY = math.clamp(bubFrame.AbsolutePosition.Y - SrvPage.AbsolutePosition.Y + 20, 10, SrvPage.AbsoluteSize.Y - 180)
+    local posX = math.clamp(bubFrame.AbsolutePosition.X - SrvPage.AbsolutePosition.X + 36, 10, SrvPage.AbsoluteSize.X - 200)
+
+    ContextMenu.Position = UDim2.new(0, posX, 0, posY)
+
+    if isOwn then
+        createContextMenuBtn("✏️ Edit Message", function()
+            CInput.Text = text
+            CInput:CaptureFocus()
+            deleteFirebaseData("servers/" .. SERVER_KEY .. "/messages/" .. msgId)
+            sendBigWhiteNotification("✏️ Message deleted, you can now edit and resend")
+        end)
+        createContextMenuBtn("📋 Copy Message", function()
+            CopyToClipboard(text)
+            sendBigWhiteNotification("📋 Copied text to clipboard!")
+        end)
+        createContextMenuBtn("🗑️ Delete Message", function()
+            deleteFirebaseData("servers/" .. SERVER_KEY .. "/messages/" .. msgId)
+            sendBigWhiteNotification("🗑️ Message deleted!")
+            if messageFrames[msgId] then
+                messageFrames[msgId]:Destroy()
+                messageFrames[msgId] = nil
+                renderedMessageIds[msgId] = nil
+            end
+        end)
+        createContextMenuBtn("😃 Add Reaction", function()
+            targetReactionMsgId = msgId
+            local pickerX = math.clamp(posX - 60, 0, SrvPage.AbsoluteSize.X - 280)
+            local pickerY = math.clamp(posY - 100, 0, SrvPage.AbsoluteSize.Y - 100)
+            ReactionPicker.Position = UDim2.new(0, pickerX, 0, pickerY)
+            ReactionPicker.Visible = true
+            ContextMenu.Visible = false
+        end)
+    else
+        if isPrivate then
+            createContextMenuBtn("↩ Reply in private chat", function()
+                startDMReply(dispName or sender, text)
+                ContextMenu.Visible = false
+            end)
+        else
+            createContextMenuBtn("🔒 Private Chat", function()
+                local targetPlr = nil
+                for _, p in ipairs(Players:GetPlayers()) do
+                    if p.Name:lower() == sender:lower() then targetPlr = p break end
+                end
+                if targetPlr then
+                    currentDMTarget = targetPlr
+                    dmReplyingTo = nil
+                    DmReplyPreviewFrame.Visible = false
+                    DmHeader.Text = " 🔒 Chatting with @" .. targetPlr.Name
+                    switchTab("DMS")
+                    loadDMHistoryForTarget(targetPlr)
+                    sendBigWhiteNotification("💬 Opened DM with " .. targetPlr.Name)
+                else
+                    sendBigWhiteNotification("⚠️ Target player is not in server!")
+                end
+            end)
+            createContextMenuBtn("💬 Reply", function()
+                replyingToMsg = {sender = dispName or sender, text = text}
+                ReplyPreviewText.Text = "💬 Replying to @" .. (dispName or sender) .. ": " .. text
+                ReplyPreviewFrame.Visible = true
+                MsgScroll.Size = UDim2.new(1, -6, 1, -72)
+                sendBigWhiteNotification("💬 Replying to " .. (dispName or sender))
+                ContextMenu.Visible = false
+            end)
+        end
+        createContextMenuBtn("📋 Copy Message", function()
+            CopyToClipboard(text)
+            sendBigWhiteNotification("📋 Copied text to clipboard!")
+        end)
+        createContextMenuBtn("😃 Add Reaction", function()
+            targetReactionMsgId = msgId
+            local pickerX = math.clamp(posX - 60, 0, SrvPage.AbsoluteSize.X - 280)
+            local pickerY = math.clamp(posY - 100, 0, SrvPage.AbsoluteSize.Y - 100)
+            ReactionPicker.Position = UDim2.new(0, pickerX, 0, pickerY)
+            ReactionPicker.Visible = true
+            ContextMenu.Visible = false
+        end)
+    end
+
+    ContextMenu.Visible = true
+end
+
+-- Add Message Function (NO Copy/Reply buttons in bubbles)
+addMsg = function(sender, dispName, text, parentScroll, isImg, imgUrl, senderUserId, msgId, replyData, reaction, isPrivate) 
+    playNotificationSound()
+
+    local targetScroll = parentScroll or MsgScroll
+    local targetUserId = senderUserId or UserId
+    local rankInfo = getSpecialRank(sender)
+
+    if not isImg and text ~= "" and not isPrivate and targetScroll == MsgScroll then
+        showHeadBubble(dispName or sender, text)
+    end
+
+    local wrap=Instance.new("Frame")
+    wrap.Size=UDim2.new(1,-6,0,0)
+    wrap.AutomaticSize=Enum.AutomaticSize.Y
+    wrap.BackgroundTransparency=1
+    wrap.ZIndex=503
+    wrap.Parent=targetScroll
+
+    if msgId then messageFrames[msgId] = wrap end
+
+    local layout = Instance.new("UIListLayout")
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Padding = UDim.new(0, 2)
+    layout.Parent = wrap
+
+    if replyData and replyData.sender then
+        local replyHeader = Instance.new("TextLabel")
+        replyHeader.Size = UDim2.new(1, -36, 0, 16)
+        replyHeader.Position = UDim2.new(0, 36, 0, 0)
+        replyHeader.BackgroundTransparency = 1
+        replyHeader.RichText = true
+        replyHeader.Text = "┌─ 💬 <i>replied to @" .. replyData.sender .. ": " .. (replyData.text or "") .. "</i>"
+        replyHeader.TextColor3 = C.GRAY
+        replyHeader.TextSize = 10
+        replyHeader.Font = Enum.Font.Gotham
+        replyHeader.TextXAlignment = Enum.TextXAlignment.Left
+        replyHeader.TextTruncate = Enum.TextTruncate.AtEnd
+        replyHeader.LayoutOrder = 1
+        replyHeader.ZIndex = 504
+        replyHeader.Parent = wrap
+    end
+
+    local msgContentFrame = Instance.new("Frame")
+    msgContentFrame.Size = UDim2.new(1, 0, 0, 0)
+    msgContentFrame.AutomaticSize = Enum.AutomaticSize.Y
+    msgContentFrame.BackgroundTransparency = 1
+    msgContentFrame.LayoutOrder = 2
+    msgContentFrame.ZIndex = 504
+    msgContentFrame.Parent = wrap
+    
+    -- Avatar Button with PFP Support
+    local pAvatarFrame = Instance.new("ImageButton")
+    pAvatarFrame.Name = "AvatarButton"
+    pAvatarFrame.Size = UDim2.new(0, 28, 0, 28)
+    pAvatarFrame.Position = UDim2.new(0, 2, 0, 2)
+    pAvatarFrame.BackgroundColor3 = C.BG3
+    pAvatarFrame.ZIndex = 504
+    pAvatarFrame.Parent = msgContentFrame
+    corner(pAvatarFrame, 14)
+    stroke(pAvatarFrame, C.ACCENT, 1)
+    pAvatarFrame:SetAttribute("UserId", targetUserId)
+
+    task.spawn(function()
+        local pfp = getUserPFP(targetUserId)
+        if pfp then
+            pAvatarFrame.Image = pfp
+        else
+            pcall(function()
+                local thumb = Players:GetUserThumbnailAsync(targetUserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size100x100)
+                if thumb and pAvatarFrame then pAvatarFrame.Image = thumb end
+            end)
+        end
+    end)
+
+    if isImg then
+        local bub=Instance.new("Frame")
+        bub.Size=UDim2.new(0,140,0,140)
+        bub.Position=UDim2.new(0, 36, 0, 0)
+        bub.BackgroundColor3=C.THEM
+        bub.ZIndex=504
+        bub.Parent=msgContentFrame
+        corner(bub,8) 
+        stroke(bub,C.ACCENT,1)
+
+        local label=Instance.new("TextLabel")
+        label.Size=UDim2.new(1,-8,0,18)
+        label.Position=UDim2.new(0,4,0,2)
+        label.BackgroundTransparency=1
+        label.RichText=true
+        label.TextSize=10
+        label.Font=Enum.Font.GothamBold
+        label.TextXAlignment=Enum.TextXAlignment.Left
+        label.ZIndex=505
+        label.Parent=bub
+
+        if rankInfo then
+            if rankInfo.type == "rgb" then
+                RgbLabels[label] = {rankTitle = rankInfo.title, dispName = dispName or sender, msgText = "", isImg = true}
+            else
+                local hex = string.format("#%02X%02X%02X", math.floor(rankInfo.color.R * 255), math.floor(rankInfo.color.G * 255), math.floor(rankInfo.color.B * 255))
+                label.Text = string.format("<font color=\"%s\"><b>%s</b></font> <b>%s</b>", hex, rankInfo.title, dispName or sender)
+            end
+        else
+            label.Text = "<b>" .. (dispName or sender) .. "</b>"
+        end
+
+        local img=Instance.new("ImageLabel")
+        img.Size=UDim2.new(1,-8,1,-24)
+        img.Position=UDim2.new(0,4,0,20)
+        img.BackgroundTransparency=1
+        img.Image=imgUrl
+        img.ScaleType=Enum.ScaleType.Fit
+        img.ZIndex=505
+        img.Parent=bub
+        corner(img,6)
+        
+        -- Reaction label for image messages
+        local rxLabel = Instance.new("TextLabel")
+        rxLabel.Name = "ReactionLabel"
+        rxLabel.Size = UDim2.new(0, 24, 0, 24)
+        rxLabel.Position = UDim2.new(1, -26, 1, -26)
+        rxLabel.BackgroundTransparency = 1
+        rxLabel.Text = reaction or ""
+        rxLabel.TextSize = 14
+        rxLabel.ZIndex = 506
+        rxLabel.Parent = bub
+    else
+        local bub=Instance.new("Frame")
+        bub.Size=UDim2.new(0.85, 0, 0, 0)
+        bub.Position=UDim2.new(0, 36, 0, 0)
+        bub.AutomaticSize=Enum.AutomaticSize.Y
+        bub.BackgroundColor3 = isPrivate and Color3.fromRGB(60, 20, 80) or C.THEM
+        bub.ZIndex=504
+        bub.Parent=msgContentFrame
+        corner(bub,8) 
+
+        local lbl=Instance.new("TextButton")
+        lbl.Size=UDim2.new(1,-32,0,0)
+        lbl.AutomaticSize=Enum.AutomaticSize.Y
+        lbl.Position=UDim2.new(0,6,0,5)
+        lbl.BackgroundTransparency=1
+        lbl.RichText=true
+        lbl.TextColor3=C.WHITE
+        lbl.TextSize=12
+        lbl.Font=Enum.Font.Gotham
+        lbl.TextWrapped=true
+        lbl.TextXAlignment=Enum.TextXAlignment.Left
+        lbl.ZIndex=505
+        lbl.Parent=bub
+
+        if rankInfo then
+            if rankInfo.type == "rgb" then
+                RgbLabels[lbl] = {rankTitle = rankInfo.title, dispName = dispName or sender, msgText = text, isImg = false}
+            else
+                local hex = string.format("#%02X%02X%02X", math.floor(rankInfo.color.R * 255), math.floor(rankInfo.color.G * 255), math.floor(rankInfo.color.B * 255))
+                lbl.Text = string.format("<font color=\"%s\"><b>%s</b></font> <b>%s:</b> %s", hex, rankInfo.title, dispName or sender, text)
+            end
+        else
+            lbl.Text = string.format("<b>%s:</b> %s", dispName or sender, text)
+        end
+
+        if msgId then
+            messageTextLabels[msgId] = {label = lbl, sender = sender, dispName = dispName or sender, rankInfo = rankInfo}
+        end
+
+        -- Long press handler for context menu
+        local holding = false
+        local holdToken = 0
+        local holdStarted = false
+
+        local function startHold()
+            if holdStarted then return end
+            holdStarted = true
+            holding = true
+            holdToken += 1
+            local myToken = holdToken
+            task.delay(HOLD_TIME, function()
+                if holding and myToken == holdToken and msgId then
+                    openHoldMenu(msgId, sender, dispName or sender, text, bub, isPrivate)
+                end
+                holdStarted = false
+            end)
+        end
+
+        local function endHold()
+            holding = false
+            holdStarted = false
+            holdToken += 1
+        end
+
+        lbl.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+                startHold()
+            end
+        end)
+
+        lbl.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+                endHold()
+            end
+        end)
+
+        bub.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+                startHold()
+            end
+        end)
+
+        bub.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+                endHold()
+            end
+        end)
+
+        -- Reaction label for text messages
+        local rxLabel = Instance.new("TextLabel")
+        rxLabel.Name = "ReactionLabel"
+        rxLabel.Size = UDim2.new(0, 24, 0, 24)
+        rxLabel.Position = UDim2.new(1, -26, 1, -26)
+        rxLabel.BackgroundTransparency = 1
+        rxLabel.Text = reaction or ""
+        rxLabel.TextSize = 14
+        rxLabel.ZIndex = 506
+        rxLabel.Parent = bub
+    end
+
+    task.spawn(function() 
+        if targetScroll then targetScroll.CanvasPosition=Vector2.new(0,targetScroll.AbsoluteCanvasSize.Y) end 
+    end)
+end 
+
+local function postImageAsset(url)
+    if not url or url == "" then return end
+    addMsg(PlayerName, DisplayName, "", MsgScroll, true, url, UserId)
+
+    local payload = {
+        sender = PlayerName,
+        displayName = DisplayName,
+        userId = UserId,
+        isImg = true,
+        imgUrl = url,
+        timestamp = os.time()
+    }
+    task.spawn(sendFirebaseData, "servers/" .. SERVER_KEY .. "/messages", payload)
+end
+
+-- Sticker Picker Popover Grid
+local AssetPickerFrame = Instance.new("Frame")
+AssetPickerFrame.Size = UDim2.new(0, 240, 0, 180)
+AssetPickerFrame.Position = UDim2.new(0, 10, 1, -230)
+AssetPickerFrame.BackgroundColor3 = C.BG3
+AssetPickerFrame.Visible = false
+AssetPickerFrame.ZIndex = 900
+AssetPickerFrame.Parent = SrvPage
+corner(AssetPickerFrame, 10)
+stroke(AssetPickerFrame, C.ACCENT, 1.5)
+
+local AssetCustomInput = Instance.new("TextBox")
+AssetCustomInput.Size = UDim2.new(1, -60, 0, 24)
+AssetCustomInput.Position = UDim2.new(0, 6, 0, 6)
+AssetCustomInput.BackgroundColor3 = C.INPUT
+AssetCustomInput.PlaceholderText = "rbxthumb:// or ID..."
+AssetCustomInput.PlaceholderColor3 = C.GRAY
+AssetCustomInput.Text = ""
+AssetCustomInput.TextColor3 = C.WHITE
+AssetCustomInput.TextSize = 10
+AssetCustomInput.Font = Enum.Font.Gotham
+AssetCustomInput.ZIndex = 901
+AssetCustomInput.Parent = AssetPickerFrame
+corner(AssetCustomInput, 6)
+
+local AssetCustomBtn = Instance.new("TextButton")
+AssetCustomBtn.Size = UDim2.new(0, 42, 0, 24)
+AssetCustomBtn.Position = UDim2.new(1, -48, 0, 6)
+AssetCustomBtn.BackgroundColor3 = C.ACCENT
+AssetCustomBtn.Text = "Send"
+AssetCustomBtn.TextColor3 = C.WHITE
+AssetCustomBtn.TextSize = 10
+AssetCustomBtn.Font = Enum.Font.GothamBold
+AssetCustomBtn.ZIndex = 901
+AssetCustomBtn.Parent = AssetPickerFrame
+corner(AssetCustomBtn, 6)
+
+AssetCustomBtn.MouseButton1Click:Connect(function()
+    local val = AssetCustomInput.Text
+    if val ~= "" then
+        if not val:find("rbxthumb://") and not val:find("rbxassetid://") and tonumber(val) then
+            val = "rbxassetid://" .. val
+        end
+        postImageAsset(val)
+        AssetCustomInput.Text = ""
+        AssetPickerFrame.Visible = false
+    end
+end)
+
+local AssetPickerScroll = Instance.new("ScrollingFrame")
+AssetPickerScroll.Size = UDim2.new(1, -12, 1, -40)
+AssetPickerScroll.Position = UDim2.new(0, 6, 0, 34)
+AssetPickerScroll.BackgroundTransparency = 1
+AssetPickerScroll.ZIndex = 901
+AssetPickerScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+AssetPickerScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+AssetPickerScroll.ScrollBarThickness = 3
+AssetPickerScroll.Parent = AssetPickerFrame
+
+local AssetPickerLayout = Instance.new("UIGridLayout")
+AssetPickerLayout.CellSize = UDim2.new(0, 50, 0, 50)
+AssetPickerLayout.CellPadding = UDim2.new(0, 6, 0, 6)
+AssetPickerLayout.Parent = AssetPickerScroll
+
+for _, item in ipairs(PRESET_ASSETS) do
+    local btn = Instance.new("ImageButton")
+    btn.Image = item.url
+    btn.BackgroundColor3 = C.WIN
+    btn.ZIndex = 902
+    btn.Parent = AssetPickerScroll
+    corner(btn, 6)
+    
+    btn.MouseButton1Click:Connect(function()
+        AssetPickerFrame.Visible = false
+        postImageAsset(item.url)
+    end)
+end
+
+CamBtn.MouseButton1Click:Connect(function()
+    AssetPickerFrame.Visible = not AssetPickerFrame.Visible
+end)
+
+-- Stickers Tab UI
+local StickersTab = Instance.new("Frame")
+StickersTab.Size = UDim2.new(1, 0, 1, 0)
+StickersTab.BackgroundTransparency = 1
+StickersTab.Visible = false
+StickersTab.ZIndex = 501
+StickersTab.Parent = Content
+
+local TabCustomInput = Instance.new("TextBox")
+TabCustomInput.Size = UDim2.new(1, -80, 0, 28)
+TabCustomInput.Position = UDim2.new(0, 10, 0, 6)
+TabCustomInput.BackgroundColor3 = C.INPUT
+TabCustomInput.PlaceholderText = "Paste rbxthumb:// or Asset ID..."
+TabCustomInput.PlaceholderColor3 = C.GRAY
+TabCustomInput.Text = ""
+TabCustomInput.TextColor3 = C.WHITE
+TabCustomInput.TextSize = 11
+TabCustomInput.Font = Enum.Font.Gotham
+TabCustomInput.ZIndex = 502
+TabCustomInput.Parent = StickersTab
+corner(TabCustomInput, 6)
+
+local TabCustomBtn = Instance.new("TextButton")
+TabCustomBtn.Size = UDim2.new(0, 60, 0, 28)
+TabCustomBtn.Position = UDim2.new(1, -65, 0, 6)
+TabCustomBtn.BackgroundColor3 = C.ACCENT
+TabCustomBtn.Text = "Send"
+TabCustomBtn.TextColor3 = C.WHITE
+TabCustomBtn.TextSize = 11
+TabCustomBtn.Font = Enum.Font.GothamBold
+TabCustomBtn.ZIndex = 502
+TabCustomBtn.Parent = StickersTab
+corner(TabCustomBtn, 6)
+
+TabCustomBtn.MouseButton1Click:Connect(function()
+    local val = TabCustomInput.Text
+    if val ~= "" then
+        if not val:find("rbxthumb://") and not val:find("rbxassetid://") and tonumber(val) then
+            val = "rbxassetid://" .. val
+        end
+        postImageAsset(val)
+        TabCustomInput.Text = ""
+        if switchTab then switchTab("SERVER") end
+    end
+end)
+
+local StickerScroll = Instance.new("ScrollingFrame")
+StickerScroll.Size = UDim2.new(1, -20, 1, -50)
+StickerScroll.Position = UDim2.new(0, 10, 0, 40)
+StickerScroll.BackgroundTransparency = 1
+StickerScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+StickerScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+StickerScroll.ScrollBarThickness = 4
+StickerScroll.Parent = StickersTab
+
+local StickerGrid = Instance.new("UIGridLayout")
+StickerGrid.CellSize = UDim2.new(0, 85, 0, 85)
+StickerGrid.CellPadding = UDim2.new(0, 10, 0, 10)
+StickerGrid.Parent = StickerScroll
+
+for _, item in ipairs(PRESET_ASSETS) do
+    local btn = Instance.new("ImageButton")
+    btn.Image = item.url
+    btn.BackgroundColor3 = C.BG2
+    btn.ZIndex = 502
+    btn.Parent = StickerScroll
+    corner(btn, 8)
+    stroke(btn, C.ACCENT, 1)
+
+    btn.MouseButton1Click:Connect(function()
+        postImageAsset(item.url)
+        if switchTab then switchTab("SERVER") end
+    end)
+end
+
+-- Themes Page UI
+local ThemesPage=Instance.new("Frame")
+ThemesPage.Size=UDim2.new(1,0,1,0)
+ThemesPage.BackgroundTransparency=1
+ThemesPage.Visible=false
+ThemesPage.ZIndex=501
+ThemesPage.Parent=Content
+
+-- Music Tab UI and playback system (adapted from the supplied music player)
+local MusicPage = Instance.new("Frame")
+MusicPage.Name = "MusicPage"
+MusicPage.Size = UDim2.new(1, 0, 1, 0)
+MusicPage.BackgroundTransparency = 1
+MusicPage.Visible = false
+MusicPage.ZIndex = 501
+MusicPage.Parent = Content
+
+local MusicState = {
+    sound = nil,
+    title = "No music playing",
+    queue = {},
+    volume = 0.8,
+    looping = false,
+    playing = false,
+    downloadBusy = false,
+}
+
+local MusicFolder = "TATrMusic/"
+local MusicApiKeys = {
+    "21fbd971d02303568cf35043e7993dafc4ddf260",
+    "bbef82fcaaf5e3272e8c2b7e373239add6f0a5ad",
+    "13e24bc93edbe1f693dd89ca192ed67b63e7eae4",
+    "8e478fd61e30968d16db9e542402d4782738a201",
+    "c9aa069e6bf1b0714c2c407f8370fa273c1485ec",
+}
+
+local MusicTitleLabel = Instance.new("TextLabel")
+MusicTitleLabel.Size = UDim2.new(1, -20, 0, 20)
+MusicTitleLabel.Position = UDim2.new(0, 10, 0, 5)
+MusicTitleLabel.BackgroundTransparency = 1
+MusicTitleLabel.Text = "No music playing"
+MusicTitleLabel.TextColor3 = C.WHITE
+MusicTitleLabel.TextSize = 12
+MusicTitleLabel.Font = Enum.Font.GothamBold
+MusicTitleLabel.TextTruncate = Enum.TextTruncate.AtEnd
+MusicTitleLabel.TextXAlignment = Enum.TextXAlignment.Center
+MusicTitleLabel.ZIndex = 502
+MusicTitleLabel.Parent = MusicPage
+
+local MusicStatusLabel = Instance.new("TextLabel")
+MusicStatusLabel.Size = UDim2.new(1, -20, 0, 15)
+MusicStatusLabel.Position = UDim2.new(0, 10, 0, 25)
+MusicStatusLabel.BackgroundTransparency = 1
+MusicStatusLabel.Text = "Ready"
+MusicStatusLabel.TextColor3 = C.GRAY
+MusicStatusLabel.TextSize = 10
+MusicStatusLabel.Font = Enum.Font.Gotham
+MusicStatusLabel.TextXAlignment = Enum.TextXAlignment.Center
+MusicStatusLabel.ZIndex = 502
+MusicStatusLabel.Parent = MusicPage
+
+local MusicProgressBG = Instance.new("Frame")
+MusicProgressBG.Size = UDim2.new(1, -28, 0, 5)
+MusicProgressBG.Position = UDim2.new(0, 14, 0, 46)
+MusicProgressBG.BackgroundColor3 = C.BG3
+MusicProgressBG.BorderSizePixel = 0
+MusicProgressBG.ZIndex = 502
+MusicProgressBG.Parent = MusicPage
+corner(MusicProgressBG, 3)
+local MusicProgressFill = Instance.new("Frame")
+MusicProgressFill.Size = UDim2.new(0, 0, 1, 0)
+MusicProgressFill.BackgroundColor3 = C.ACCENT
+MusicProgressFill.BorderSizePixel = 0
+MusicProgressFill.ZIndex = 503
+MusicProgressFill.Parent = MusicProgressBG
+corner(MusicProgressFill, 3)
+
+local MusicTimeLabel = Instance.new("TextLabel")
+MusicTimeLabel.Size = UDim2.new(0, 48, 0, 13)
+MusicTimeLabel.Position = UDim2.new(0, 14, 0, 53)
+MusicTimeLabel.BackgroundTransparency = 1
+MusicTimeLabel.Text = "0:00 / 0:00"
+MusicTimeLabel.TextColor3 = C.GRAY
+MusicTimeLabel.TextSize = 9
+MusicTimeLabel.Font = Enum.Font.Code
+MusicTimeLabel.TextXAlignment = Enum.TextXAlignment.Left
+MusicTimeLabel.ZIndex = 502
+MusicTimeLabel.Parent = MusicPage
+
+local function makeMusicButton(text, size, position)
+    local button = Instance.new("TextButton")
+    button.Size = size
+    button.Position = position
+    button.BackgroundColor3 = C.BG3
+    button.Text = text
+    button.TextColor3 = C.WHITE
+    button.TextSize = 10
+    button.Font = Enum.Font.GothamBold
+    button.AutoButtonColor = true
+    button.ZIndex = 503
+    button.Parent = MusicPage
+    corner(button, 6)
+    stroke(button, C.ACCENT, 1)
+    return button
+end
+
+local MusicPlayBtn = makeMusicButton("▶ Play", UDim2.new(0, 70, 0, 27), UDim2.new(0, 12, 0, 70))
+local MusicPauseBtn = makeMusicButton("⏸ Pause", UDim2.new(0, 70, 0, 27), UDim2.new(0, 88, 0, 70))
+local MusicQueueBtn = makeMusicButton("▶▶ Queue library", UDim2.new(0, 120, 0, 27), UDim2.new(0, 164, 0, 70))
+local MusicLoopBtn = makeMusicButton("Loop: OFF", UDim2.new(0, 90, 0, 27), UDim2.new(1, -102, 0, 70))
+
+local MusicVolumeLabel = Instance.new("TextLabel")
+MusicVolumeLabel.Size = UDim2.new(0, 52, 0, 18)
+MusicVolumeLabel.Position = UDim2.new(0, 12, 0, 104)
+MusicVolumeLabel.BackgroundTransparency = 1
+MusicVolumeLabel.Text = "Volume"
+MusicVolumeLabel.TextColor3 = C.GRAY
+MusicVolumeLabel.TextSize = 10
+MusicVolumeLabel.Font = Enum.Font.GothamBold
+MusicVolumeLabel.ZIndex = 502
+MusicVolumeLabel.Parent = MusicPage
+local MusicVolumeBG = Instance.new("Frame")
+MusicVolumeBG.Size = UDim2.new(1, -82, 0, 6)
+MusicVolumeBG.Position = UDim2.new(0, 68, 0, 110)
+MusicVolumeBG.BackgroundColor3 = C.BG3
+MusicVolumeBG.BorderSizePixel = 0
+MusicVolumeBG.ZIndex = 502
+MusicVolumeBG.Parent = MusicPage
+corner(MusicVolumeBG, 3)
+local MusicVolumeFill = Instance.new("Frame")
+MusicVolumeFill.Size = UDim2.new(MusicState.volume, 0, 1, 0)
+MusicVolumeFill.BackgroundColor3 = C.ACCENT
+MusicVolumeFill.BorderSizePixel = 0
+MusicVolumeFill.ZIndex = 503
+MusicVolumeFill.Parent = MusicVolumeBG
+corner(MusicVolumeFill, 3)
+local MusicVolumeKnob = Instance.new("Frame")
+MusicVolumeKnob.Size = UDim2.new(0, 12, 0, 12)
+MusicVolumeKnob.AnchorPoint = Vector2.new(0.5, 0.5)
+MusicVolumeKnob.Position = UDim2.new(MusicState.volume, 0, 0.5, 0)
+MusicVolumeKnob.BackgroundColor3 = C.WHITE
+MusicVolumeKnob.BorderSizePixel = 0
+MusicVolumeKnob.ZIndex = 504
+MusicVolumeKnob.Parent = MusicVolumeBG
+corner(MusicVolumeKnob, 6)
+local draggingMusicVolume = false
+local function updateMusicVolume(input)
+    local volume = math.clamp((input.Position.X - MusicVolumeBG.AbsolutePosition.X) / math.max(MusicVolumeBG.AbsoluteSize.X, 1), 0, 1)
+    MusicState.volume = volume
+    MusicVolumeFill.Size = UDim2.new(volume, 0, 1, 0)
+    MusicVolumeKnob.Position = UDim2.new(volume, 0, 0.5, 0)
+    if MusicState.sound then MusicState.sound.Volume = volume end
+end
+MusicVolumeBG.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        draggingMusicVolume = true
+        updateMusicVolume(input)
+    end
+end)
+MusicVolumeKnob.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        draggingMusicVolume = true
+        updateMusicVolume(input)
+    end
+end)
+UIS.InputChanged:Connect(function(input)
+    if draggingMusicVolume and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        updateMusicVolume(input)
+    end
+end)
+UIS.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        draggingMusicVolume = false
+    end
+end)
+
+local MusicUrlBox = Instance.new("TextBox")
+MusicUrlBox.Size = UDim2.new(1, -98, 0, 27)
+MusicUrlBox.Position = UDim2.new(0, 10, 0, 128)
+MusicUrlBox.BackgroundColor3 = C.INPUT
+MusicUrlBox.PlaceholderText = "Paste a YouTube URL to download and play"
+MusicUrlBox.PlaceholderColor3 = C.GRAY
+MusicUrlBox.Text = ""
+MusicUrlBox.TextColor3 = C.WHITE
+MusicUrlBox.TextSize = 10
+MusicUrlBox.Font = Enum.Font.Gotham
+MusicUrlBox.ClearTextOnFocus = false
+MusicUrlBox.ZIndex = 503
+MusicUrlBox.Parent = MusicPage
+corner(MusicUrlBox, 6)
+stroke(MusicUrlBox, C.WINOUT, 1)
+local MusicDownloadBtn = makeMusicButton("Download", UDim2.new(0, 78, 0, 27), UDim2.new(1, -88, 0, 128))
+local MusicDownloadBarBG = Instance.new("Frame")
+MusicDownloadBarBG.Size = UDim2.new(1, -20, 0, 4)
+MusicDownloadBarBG.Position = UDim2.new(0, 10, 0, 160)
+MusicDownloadBarBG.BackgroundColor3 = C.BG3
+MusicDownloadBarBG.BorderSizePixel = 0
+MusicDownloadBarBG.Visible = false
+MusicDownloadBarBG.ZIndex = 502
+MusicDownloadBarBG.Parent = MusicPage
+corner(MusicDownloadBarBG, 2)
+local MusicDownloadBarFill = Instance.new("Frame")
+MusicDownloadBarFill.Size = UDim2.new(0, 0, 1, 0)
+MusicDownloadBarFill.BackgroundColor3 = C.ACCENT
+MusicDownloadBarFill.BorderSizePixel = 0
+MusicDownloadBarFill.ZIndex = 503
+MusicDownloadBarFill.Parent = MusicDownloadBarBG
+corner(MusicDownloadBarFill, 2)
+
+local MusicLibraryTitle = Instance.new("TextLabel")
+MusicLibraryTitle.Size = UDim2.new(1, -20, 0, 18)
+MusicLibraryTitle.Position = UDim2.new(0, 10, 0, 168)
+MusicLibraryTitle.BackgroundTransparency = 1
+MusicLibraryTitle.Text = "Saved music library"
+MusicLibraryTitle.TextColor3 = C.WHITE
+MusicLibraryTitle.TextSize = 10
+MusicLibraryTitle.Font = Enum.Font.GothamBold
+MusicLibraryTitle.TextXAlignment = Enum.TextXAlignment.Left
+MusicLibraryTitle.ZIndex = 502
+MusicLibraryTitle.Parent = MusicPage
+local MusicLibrary = Instance.new("ScrollingFrame")
+MusicLibrary.Size = UDim2.new(1, -16, 1, -192)
+MusicLibrary.Position = UDim2.new(0, 8, 0, 188)
+MusicLibrary.BackgroundColor3 = C.BG2
+MusicLibrary.BackgroundTransparency = 0.2
+MusicLibrary.BorderSizePixel = 0
+MusicLibrary.ScrollBarThickness = 3
+MusicLibrary.ScrollBarImageColor3 = C.ACCENT
+MusicLibrary.CanvasSize = UDim2.new(0, 0, 0, 0)
+MusicLibrary.AutomaticCanvasSize = Enum.AutomaticSize.Y
+MusicLibrary.ZIndex = 502
+MusicLibrary.Parent = MusicPage
+corner(MusicLibrary, 6)
+local MusicLibraryLayout = Instance.new("UIListLayout")
+MusicLibraryLayout.SortOrder = Enum.SortOrder.LayoutOrder
+MusicLibraryLayout.Padding = UDim.new(0, 3)
+MusicLibraryLayout.Parent = MusicLibrary
+local MusicLibraryPadding = Instance.new("UIPadding")
+MusicLibraryPadding.PaddingLeft = UDim.new(0, 4)
+MusicLibraryPadding.PaddingRight = UDim.new(0, 4)
+MusicLibraryPadding.PaddingTop = UDim.new(0, 4)
+MusicLibraryPadding.Parent = MusicLibrary
+
+local function setMusicStatus(text)
+    MusicStatusLabel.Text = tostring(text or "")
+end
+local function musicTime(seconds)
+    seconds = math.max(0, math.floor(tonumber(seconds) or 0))
+    return string.format("%d:%02d", math.floor(seconds / 60), seconds % 60)
+end
+local function stopCurrentMusic()
+    local sound = MusicState.sound
+    MusicState.sound = nil
+    MusicState.playing = false
+    if sound then
+        pcall(function() sound:Stop(); sound:Destroy() end)
+    end
+end
+local function playNextMusic()
+    local nextTrack = table.remove(MusicState.queue, 1)
+    if nextTrack then
+        task.wait(0.1)
+        nextTrack.sound.Volume = MusicState.volume
+        nextTrack.sound.Looped = MusicState.looping
+        nextTrack.sound.Parent = SoundService
+        MusicState.sound = nextTrack.sound
+        MusicState.title = nextTrack.title
+        MusicState.playing = true
+        MusicTitleLabel.Text = nextTrack.title
+        setMusicStatus("Playing from queue")
+        local ok = pcall(function() nextTrack.sound:Play() end)
+        if not ok then stopCurrentMusic(); setMusicStatus("Playback error") end
+        return
+    end
+    MusicState.playing = false
+    MusicTitleLabel.Text = "No music playing"
+    MusicState.title = "No music playing"
+    setMusicStatus("Ready")
+end
+local function playMusicSound(sound, title)
+    stopCurrentMusic()
+    MusicState.sound = sound
+    MusicState.title = title or "Playing"
+    MusicTitleLabel.Text = MusicState.title
+    sound.Volume = MusicState.volume
+    sound.Looped = MusicState.looping
+    sound.Parent = SoundService
+    local ok = pcall(function() sound:Play() end)
+    if not ok then
+        stopCurrentMusic()
+        setMusicStatus("Playback error")
+        return false
+    end
+    MusicState.playing = true
+    setMusicStatus("Playing")
+    sound.Ended:Connect(function()
+        if MusicState.sound == sound and not MusicState.looping then
+            MusicState.sound = nil
+            MusicState.playing = false
+            pcall(function() sound:Destroy() end)
+            playNextMusic()
+        end
+    end)
+    return true
+end
+local function musicAssetId(path)
+    if type(getcustomasset) == "function" then
+        local ok, asset = pcall(getcustomasset, path)
+        if ok and asset then return asset end
+    end
+    return "rbxasset://" .. path
+end
+local function playMusicFile(path, title)
+    local sound = Instance.new("Sound")
+    sound.Name = "ZaNeLocalMusic_" .. tostring(math.floor(os.clock() * 1000))
+    sound.SoundId = musicAssetId(path)
+    sound.Volume = MusicState.volume
+    sound.Looped = MusicState.looping
+    return playMusicSound(sound, title)
+end
+
+local function refreshMusicLibrary()
+    for _, child in ipairs(MusicLibrary:GetChildren()) do
+        if child:IsA("GuiObject") and child ~= MusicLibraryLayout and child ~= MusicLibraryPadding then
+            child:Destroy()
+        end
+    end
+    if type(isfolder) ~= "function" or type(listfiles) ~= "function" then
+        MusicLibraryTitle.Text = "Saved music library (executor file APIs unavailable)"
+        return
+    end
+    local okFolder, folderExists = pcall(isfolder, MusicFolder)
+    if not okFolder or not folderExists then
+        MusicLibraryTitle.Text = "Saved music library (empty)"
+        return
+    end
+    local okFiles, files = pcall(listfiles, MusicFolder)
+    if not okFiles or type(files) ~= "table" then
+        MusicLibraryTitle.Text = "Saved music library (could not read files)"
+        return
+    end
+    local tracks = {}
+    for _, path in ipairs(files) do
+        if type(path) == "string" and path:lower():match("%.mp3$") then
+            table.insert(tracks, path)
+        end
+    end
+    table.sort(tracks)
+    MusicLibraryTitle.Text = "Saved music library (" .. #tracks .. ")"
+    if #tracks == 0 then
+        local empty = Instance.new("TextLabel")
+        empty.Size = UDim2.new(1, -8, 0, 24)
+        empty.BackgroundTransparency = 1
+        empty.Text = "Downloaded MP3 tracks will appear here."
+        empty.TextColor3 = C.GRAY
+        empty.TextSize = 9
+        empty.Font = Enum.Font.Gotham
+        empty.ZIndex = 503
+        empty.Parent = MusicLibrary
+        return
+    end
+    for index, path in ipairs(tracks) do
+        local name = path:match("[^\\/]+%.mp3$") or path
+        name = name:gsub("%.mp3$", "")
+        local row = Instance.new("Frame")
+        row.Size = UDim2.new(1, -2, 0, 27)
+        row.LayoutOrder = index
+        row.BackgroundColor3 = C.BG3
+        row.BorderSizePixel = 0
+        row.ZIndex = 503
+        row.Parent = MusicLibrary
+        corner(row, 5)
+        local playBtn = Instance.new("TextButton")
+        playBtn.Size = UDim2.new(0, 34, 1, -4)
+        playBtn.Position = UDim2.new(0, 2, 0, 2)
+        playBtn.BackgroundColor3 = C.ACCENT
+        playBtn.Text = "▶"
+        playBtn.TextColor3 = C.WHITE
+        playBtn.TextSize = 10
+        playBtn.Font = Enum.Font.GothamBold
+        playBtn.ZIndex = 504
+        playBtn.Parent = row
+        corner(playBtn, 4)
+        local nameLabel = Instance.new("TextLabel")
+        nameLabel.Size = UDim2.new(1, -96, 1, 0)
+        nameLabel.Position = UDim2.new(0, 40, 0, 0)
+        nameLabel.BackgroundTransparency = 1
+        nameLabel.Text = name
+        nameLabel.TextColor3 = C.WHITE
+        nameLabel.TextSize = 9
+        nameLabel.Font = Enum.Font.Gotham
+        nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+        nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
+        nameLabel.ZIndex = 504
+        nameLabel.Parent = row
+        local renameInput = Instance.new("TextBox")
+        renameInput.Size = UDim2.new(1, -96, 1, -4)
+        renameInput.Position = UDim2.new(0, 40, 0, 2)
+        renameInput.BackgroundColor3 = C.INPUT
+        renameInput.Text = name
+        renameInput.PlaceholderText = "Track name"
+        renameInput.TextColor3 = C.WHITE
+        renameInput.TextSize = 9
+        renameInput.Font = Enum.Font.Gotham
+        renameInput.ClearTextOnFocus = false
+        renameInput.Visible = false
+        renameInput.ZIndex = 505
+        renameInput.Parent = row
+        corner(renameInput, 4)
+        local renameBtn = Instance.new("TextButton")
+        renameBtn.Size = UDim2.new(0, 22, 1, -4)
+        renameBtn.Position = UDim2.new(1, -50, 0, 2)
+        renameBtn.BackgroundColor3 = C.BG2
+        renameBtn.Text = "✎"
+        renameBtn.TextColor3 = C.WHITE
+        renameBtn.TextSize = 11
+        renameBtn.Font = Enum.Font.GothamBold
+        renameBtn.ZIndex = 504
+        renameBtn.Parent = row
+        corner(renameBtn, 4)
+        local deleteBtn = Instance.new("TextButton")
+        deleteBtn.Size = UDim2.new(0, 24, 1, -4)
+        deleteBtn.Position = UDim2.new(1, -26, 0, 2)
+        deleteBtn.BackgroundColor3 = Color3.fromRGB(170, 55, 65)
+        deleteBtn.Text = "×"
+        deleteBtn.TextColor3 = C.WHITE
+        deleteBtn.TextSize = 14
+        deleteBtn.Font = Enum.Font.GothamBold
+        deleteBtn.ZIndex = 504
+        deleteBtn.Parent = row
+        corner(deleteBtn, 4)
+        playBtn.MouseButton1Click:Connect(function()
+            setMusicStatus("Loading " .. name)
+            playMusicFile(path, name)
+        end)
+        renameBtn.MouseButton1Click:Connect(function()
+            nameLabel.Visible = false
+            renameInput.Text = name
+            renameInput.Visible = true
+            renameInput:CaptureFocus()
+        end)
+        renameInput.FocusLost:Connect(function(enterPressed)
+            if not enterPressed then
+                renameInput.Visible = false
+                nameLabel.Visible = true
+                return
+            end
+            local newName = renameInput.Text:match("^%s*(.-)%s*$")
+            newName = newName:gsub("[\\/:*?\"<>|]", ""):sub(1, 60)
+            if newName == "" or type(readfile) ~= "function" or type(writefile) ~= "function" or type(delfile) ~= "function" then
+                setMusicStatus("Invalid name or rename API unavailable")
+                renameInput.Visible = false
+                nameLabel.Visible = true
+                return
+            end
+            local newPath = MusicFolder .. newName .. ".mp3"
+            if newPath ~= path and type(isfile) == "function" then
+                local existsOk, exists = pcall(isfile, newPath)
+                if existsOk and exists then
+                    setMusicStatus("A track with that name already exists")
+                    renameInput.Visible = false
+                    nameLabel.Visible = true
+                    return
+                end
+            end
+            local okRename = pcall(function()
+                local contents = readfile(path)
+                writefile(newPath, contents)
+                if newPath ~= path then delfile(path) end
+            end)
+            if okRename then
+                setMusicStatus("Track renamed")
+                refreshMusicLibrary()
+            else
+                setMusicStatus("Could not rename track")
+                renameInput.Visible = false
+                nameLabel.Visible = true
+            end
+        end)
+        deleteBtn.MouseButton1Click:Connect(function()
+            if type(delfile) ~= "function" then setMusicStatus("Delete unavailable: executor file API missing"); return end
+            local deleted = pcall(delfile, path)
+            if deleted then refreshMusicLibrary() else setMusicStatus("Could not delete track") end
+        end)
+    end
+end
+
+local function queueMusicLibrary()
+    if type(isfolder) ~= "function" or type(listfiles) ~= "function" then
+        setMusicStatus("Executor file APIs unavailable")
+        return
+    end
+    local ok, files = pcall(listfiles, MusicFolder)
+    if not ok or type(files) ~= "table" then setMusicStatus("Library is empty"); return end
+    local tracks = {}
+    for _, path in ipairs(files) do
+        if type(path) == "string" and path:lower():match("%.mp3$") then table.insert(tracks, path) end
+    end
+    table.sort(tracks)
+    if #tracks == 0 then setMusicStatus("Library is empty"); return end
+    for _, path in ipairs(tracks) do
+        local sound = Instance.new("Sound")
+        sound.Name = "ZaNeQueuedMusic_" .. tostring(math.floor(os.clock() * 1000))
+        sound.SoundId = musicAssetId(path)
+        table.insert(MusicState.queue, {sound = sound, title = path:match("[^\\/]+%.mp3$"):gsub("%.mp3$", "")})
+    end
+    if not MusicState.playing then playNextMusic() else setMusicStatus("Added " .. #tracks .. " tracks to queue") end
+end
+
+local function encodeMusicUrl(value)
+    return (value:gsub("([^%w%-%.%_%~])", function(char)
+        return string.format("%%%02X", string.byte(char))
+    end))
+end
+local function musicHttpGet(url)
+    if not httpRequest then return nil, "HTTP request unavailable" end
+    local ok, response = pcall(function() return httpRequest({Url = url, Method = "GET"}) end)
+    if not ok or not response or type(response.Body) ~= "string" then
+        return nil, "No response from download service"
+    end
+    return response.Body
+end
+local function decodeMusicJson(body)
+    local ok, decoded = pcall(function() return HttpService:JSONDecode(body) end)
+    if ok then return decoded end
+    return nil
+end
+local function requestMusicDownloadId(youtubeUrl)
+    local lastError = "Download request failed"
+    for _, key in ipairs(MusicApiKeys) do
+        local apiUrl = "https://p.savenow.to/ajax/download.php?url=" .. encodeMusicUrl(youtubeUrl)
+            .. "&format=mp3&apikey=" .. key .. "&add_info=1&allow_extended_duration=1&no_merge=0"
+        local body = musicHttpGet(apiUrl)
+        local decoded = body and decodeMusicJson(body)
+        if decoded and decoded.id then return decoded.id end
+        if decoded and decoded.error then lastError = tostring(decoded.error) end
+        task.wait(0.3)
+    end
+    return nil, lastError
+end
+local function waitForMusicDownload(downloadId)
+    local deadline = os.clock() + 300
+    while os.clock() < deadline do
+        local body = musicHttpGet("https://p.savenow.to/ajax/progress.php?id=" .. tostring(downloadId))
+        local info = body and decodeMusicJson(body)
+        if info then
+            local progress = tonumber(info.progress) or 0
+            if progress > 100 then progress = math.floor(progress / 10) end
+            progress = math.clamp(math.floor(progress), 0, 100)
+            MusicDownloadBarFill.Size = UDim2.new(progress / 100, 0, 1, 0)
+            setMusicStatus("Downloading: " .. progress .. "%")
+            if (tonumber(info.progress) or 0) >= 1000 and info.download_url then return info.download_url, info end
+            if info.error and info.error ~= "" then return nil, tostring(info.error) end
+        end
+        task.wait(1.5)
+    end
+    return nil, "Download timed out"
+end
+local function downloadYouTubeMusic(youtubeUrl, sharedTitle, shouldBroadcast)
+    if MusicState.downloadBusy then setMusicStatus("A download is already running"); return end
+    youtubeUrl = (youtubeUrl or ""):match("^%s*(.-)%s*$")
+    local lowerUrl = youtubeUrl:lower()
+    if not (lowerUrl:find("youtube.com", 1, true) or lowerUrl:find("youtu.be", 1, true)) then
+        setMusicStatus("Paste a valid YouTube URL")
+        return
+    end
+    if not httpRequest then setMusicStatus("HTTP request unavailable"); return end
+    if type(writefile) ~= "function" or type(isfolder) ~= "function" or type(makefolder) ~= "function" then
+        setMusicStatus("Executor file APIs unavailable")
+        return
+    end
+    MusicState.downloadBusy = true
+    MusicDownloadBtn.Active = false
+    MusicDownloadBtn.Text = "Working..."
+    MusicDownloadBarBG.Visible = true
+    MusicDownloadBarFill.Size = UDim2.new(0, 0, 1, 0)
+    setMusicStatus("Requesting YouTube audio...")
+    local success, err = pcall(function()
+        if not isfolder(MusicFolder) then makefolder(MusicFolder) end
+        local downloadId, requestError = requestMusicDownloadId(youtubeUrl)
+        if not downloadId then error(requestError or "Download request failed") end
+        local downloadUrl, infoOrError = waitForMusicDownload(downloadId)
+        if not downloadUrl then error(infoOrError or "Download failed") end
+        setMusicStatus("Saving audio...")
+        local audioBody, httpError = musicHttpGet(downloadUrl)
+        if not audioBody then error(httpError or "Audio download failed") end
+        local safeName = ("track_" .. tostring(downloadId):gsub("[^%w%-_]", "")):sub(1, 60)
+        local filePath = MusicFolder .. safeName .. ".mp3"
+        writefile(filePath, audioBody)
+        refreshMusicLibrary()
+        local title = sharedTitle or (infoOrError and infoOrError.title) or safeName
+        setMusicStatus(shouldBroadcast == false and "Saved; starting shared playback..." or "Saved; starting playback...")
+        playMusicFile(filePath, title)
+        -- The local rbxasset:// file is not visible to other clients. Share
+        -- the source URL so each client downloads and plays its own copy.
+        if shouldBroadcast ~= false and publishGlobalMusicUrl then
+            publishGlobalMusicUrl(youtubeUrl, title)
+        end
+    end)
+    if not success then setMusicStatus(tostring(err):sub(1, 60)) end
+    MusicState.downloadBusy = false
+    MusicDownloadBtn.Active = true
+    MusicDownloadBtn.Text = "Download"
+    task.delay(1, function() MusicDownloadBarBG.Visible = false end)
+end
+
+MusicPlayBtn.MouseButton1Click:Connect(function()
+    if MusicState.sound then
+        local ok = pcall(function() MusicState.sound:Play() end)
+        if ok then MusicState.playing = true; setMusicStatus("Playing") end
+    else
+        playNextMusic()
+    end
+end)
+MusicPauseBtn.MouseButton1Click:Connect(function()
+    if MusicState.sound then
+        pcall(function() MusicState.sound:Pause() end)
+        MusicState.playing = false
+        setMusicStatus("Paused")
+    end
+end)
+MusicQueueBtn.MouseButton1Click:Connect(queueMusicLibrary)
+MusicLoopBtn.MouseButton1Click:Connect(function()
+    MusicState.looping = not MusicState.looping
+    MusicLoopBtn.Text = MusicState.looping and "Loop: ON" or "Loop: OFF"
+    if MusicState.sound then MusicState.sound.Looped = MusicState.looping end
+end)
+MusicDownloadBtn.MouseButton1Click:Connect(function()
+    local url = MusicUrlBox.Text
+    MusicUrlBox.Text = ""
+    downloadYouTubeMusic(url, nil, true)
+end)
+MusicUrlBox.FocusLost:Connect(function(enterPressed)
+    if enterPressed then
+        local url = MusicUrlBox.Text
+        MusicUrlBox.Text = ""
+        downloadYouTubeMusic(url, nil, true)
+    end
+end)
+RunService.Heartbeat:Connect(function()
+    local sound = MusicState.sound
+    if sound and sound.TimeLength > 0 then
+        MusicProgressFill.Size = UDim2.new(math.clamp(sound.TimePosition / sound.TimeLength, 0, 1), 0, 1, 0)
+        MusicTimeLabel.Text = musicTime(sound.TimePosition) .. " / " .. musicTime(sound.TimeLength)
+    else
+        MusicProgressFill.Size = UDim2.new(0, 0, 1, 0)
+        MusicTimeLabel.Text = "0:00 / 0:00"
+    end
+end)
+refreshMusicLibrary()
+
+local pages={SERVER=SrvPage, DMS=DmPage, STICKERS=StickersTab, THEMES=ThemesPage, PFP=PFPPage, MUSIC=MusicPage} 
+
+local ThemeTitle=Instance.new("TextLabel")
+ThemeTitle.Size=UDim2.new(1,0,0,25)
+ThemeTitle.Position=UDim2.new(0,10,0,10)
+ThemeTitle.BackgroundTransparency=1
+ThemeTitle.Text="🎨 Theme Color Slider"
+ThemeTitle.TextColor3=C.WHITE
+ThemeTitle.TextSize=13
+ThemeTitle.Font=Enum.Font.GothamBold
+ThemeTitle.TextXAlignment=Enum.TextXAlignment.Left
+ThemeTitle.Parent=ThemesPage
+
+local SliderBar=Instance.new("Frame")
+SliderBar.Size=UDim2.new(1,-30,0,14)
+SliderBar.Position=UDim2.new(0,15,0,45)
+SliderBar.BackgroundColor3=Color3.fromRGB(50,50,50)
+SliderBar.ZIndex=502
+SliderBar.Parent=ThemesPage
+corner(SliderBar,7)
+
+local SliderGradient = Instance.new("UIGradient")
+local gradientKeys = {}
+for i = 0, 10 do
+    table.insert(gradientKeys, ColorSequenceKeypoint.new(i/10, Color3.fromHSV(i/10, 0.8, 1)))
+end
+SliderGradient.Color = ColorSequence.new(gradientKeys)
+SliderGradient.Parent = SliderBar
+
+local SliderKnob=Instance.new("Frame")
+SliderKnob.Size=UDim2.new(0,20,0,20)
+SliderKnob.Position=UDim2.new(currentHue, -10, 0.5, -10)
+SliderKnob.BackgroundColor3=C.WHITE
+SliderKnob.ZIndex=503
+SliderKnob.Parent=SliderBar
+corner(SliderKnob,10)
+stroke(SliderKnob, C.WINOUT, 2)
+
+local draggingSlider = false
+local function updateHue(input)
+    local pos = math.clamp((input.Position.X - SliderBar.AbsolutePosition.X) / SliderBar.AbsoluteSize.X, 0, 1)
+    currentHue = pos
+    SliderKnob.Position = UDim2.new(pos, -10, 0.5, -10)
+    updateThemeUI()
+end
+
+SliderBar.InputBegan:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+        draggingSlider = true
+        updateHue(inp)
+    end
+end)
+UIS.InputChanged:Connect(function(inp)
+    if draggingSlider and (inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch) then
+        updateHue(inp)
+    end
+end)
+UIS.InputEnded:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+        draggingSlider = false
+    end
+end)
+
+local SoundToggleBtn = Instance.new("TextButton")
+SoundToggleBtn.Size = UDim2.new(0, 160, 0, 32)
+SoundToggleBtn.Position = UDim2.new(0, 15, 0, 80)
+SoundToggleBtn.BackgroundColor3 = C.BG3
+SoundToggleBtn.Text = "🔔 Sound: ON"
+SoundToggleBtn.TextColor3 = C.WHITE
+SoundToggleBtn.TextSize = 12
+SoundToggleBtn.Font = Enum.Font.GothamBold
+SoundToggleBtn.ZIndex = 502
+SoundToggleBtn.Parent = ThemesPage
+corner(SoundToggleBtn, 8)
+stroke(SoundToggleBtn, C.ACCENT, 1)
+
+SoundToggleBtn.MouseButton1Click:Connect(function()
+    soundEnabled = not soundEnabled
+    SoundToggleBtn.Text = soundEnabled and "🔔 Sound: ON" or "🔕 Sound: OFF"
+    SoundToggleBtn.BackgroundColor3 = soundEnabled and C.BG3 or Color3.fromRGB(80, 30, 30)
+end)
+
+switchTab = function(name) 
+    for n,pg in pairs(pages) do pg.Visible=(n==name) end 
+    for n,t in pairs(tabBtns) do 
+        if n==name then 
+            t.b.TextColor3=C.WHITE 
+            t.ul.BackgroundTransparency=0 
+        else 
+            t.b.TextColor3=C.GRAY 
+            t.ul.BackgroundTransparency=1 
+        end 
+    end 
+end 
+for name,t in pairs(tabBtns) do t.b.MouseButton1Click:Connect(function() switchTab(name) end) end 
+
+local function addSys(text, colorOverride) 
+    playNotificationSound()
+
+    local f=Instance.new("Frame")
+    f.Size=UDim2.new(1,-6,0,0)
+    f.AutomaticSize=Enum.AutomaticSize.Y
+    f.BackgroundColor3 = colorOverride or C.SYSBG
+    f.ZIndex=503
+    f.Parent=MsgScroll
+    corner(f,6) 
+    
+    local txt=Instance.new("TextLabel")
+    txt.Size=UDim2.new(1,-10,1,0)
+    txt.AutomaticSize=Enum.AutomaticSize.Y
+    txt.Position=UDim2.new(0,5,0,0)
+    txt.BackgroundTransparency=1
+    txt.Text="⚡ [SYS] : "..text
+    txt.TextColor3=C.SYSTXT
+    txt.TextSize=11
+    txt.Font=Enum.Font.GothamBold
+    txt.TextWrapped=true
+    txt.TextXAlignment=Enum.TextXAlignment.Left
+    txt.ZIndex=504
+    txt.Parent=f
+
+    task.spawn(function()
+        MsgScroll.CanvasPosition=Vector2.new(0,MsgScroll.AbsoluteCanvasSize.Y)
+    end)
+end 
+
+-- Anti-spam protection adapted from the reference: 2s cooldown, duplicate blocking,
+-- five messages per rolling 8s window, and a 200-character message cap.
+local AntiSpamState = {sentAt = {}, lastAt = 0, lastText = ""}
+local function checkChatAntiSpam(messageText)
+    if #messageText > 200 then return "Message too long! Max 200 characters." end
+    local now = os.time()
+    for index = #AntiSpamState.sentAt, 1, -1 do
+        if now - AntiSpamState.sentAt[index] >= 8 then
+            table.remove(AntiSpamState.sentAt, index)
+        end
+    end
+    if now - AntiSpamState.lastAt < 2 then return "Slow down! You are sending messages too fast." end
+    if messageText == AntiSpamState.lastText then return "Don't repeat the same message." end
+    if #AntiSpamState.sentAt >= 5 then return "Anti-spam: too many messages. Please wait." end
+    table.insert(AntiSpamState.sentAt, now)
+    AntiSpamState.lastAt = now
+    AntiSpamState.lastText = messageText
+    return nil
+end
+
+-- Send Direct Message
+local function sendDM()
+    if not currentDMTarget then
+        sendBigWhiteNotification("⚠️ Please select a user to DM first!")
+        return
+    end
+
+    local txt = DmInput.Text
+    if txt:match("^%s*$") then return end
+    local spamWarning = checkChatAntiSpam(txt)
+    if spamWarning then sendBigWhiteNotification("⛔ " .. spamWarning); return end
+    DmInput.Text = ""
+
+    local dmReply = dmReplyingTo
+    dmReplyingTo = nil
+    DmReplyPreviewFrame.Visible = false
+    local dmKey = getDMChannelKey(UserId, currentDMTarget.UserId)
+    local payload = {
+        Sender = PlayerName,
+        DisplayName = DisplayName,
+        UserId = UserId,
+        TargetUserId = currentDMTarget.UserId,
+        TargetName = currentDMTarget.Name,
+        Text = txt,
+        replyData = dmReply,
+        timestamp = os.time()
+    }
+
+    addMsg(PlayerName, DisplayName, txt, DmMsgScroll, false, nil, UserId, nil, dmReply, nil, true)
+    task.spawn(sendFirebaseData, "dm_channels/" .. dmKey, payload)
+end
+
+DmSBtn.MouseButton1Click:Connect(sendDM)
+DmInput.FocusLost:Connect(function(ep) if ep then sendDM() end end)
+
+-- Render Message Item
+function renderMessageItem(data, msgId)
+    if renderedMessageIds[msgId] then return end
+    renderedMessageIds[msgId] = true
+
+    local isSystem = (data.Sender == "SYSTEM" or data.isSys)
+    local isSticker = string.find(data.Text or data.message or "", "%[STICKER%]:")
+    local isImage = string.find(data.Text or data.message or "", "%[IMAGE%]:") or data.isImg
+
+    if isSystem then
+        addSys(data.Text or data.message or "")
+    elseif isSticker then
+        local assetId = string.gsub(data.Text or data.message or "", "%[STICKER%]:%s*", "")
+        addMsg(data.Sender or data.sender, data.DisplayName or data.displayName or data.Sender or data.sender, "", MsgScroll, true, assetId, data.UserId or data.userId, msgId)
+    elseif isImage then
+        local imgUrl = data.imgUrl or string.gsub(data.Text or data.message or "", "%[IMAGE%]:%s*", "")
+        addMsg(data.Sender or data.sender, data.DisplayName or data.displayName or data.Sender or data.sender, "", MsgScroll, true, imgUrl, data.UserId or data.userId, msgId)
+    else
+        local textVal = data.Text or data.message or ""
+        addMsg(data.Sender or data.sender, data.DisplayName or data.displayName or data.Sender or data.sender, textVal, MsgScroll, false, nil, data.UserId or data.userId, msgId, data.replyData, data.reaction, data.isPrivate)
+    end
+
+    if not isInitialLoad and (data.Sender or data.sender) ~= PlayerName then
+        sendBigWhiteNotification("📩 New message from " .. (data.DisplayName or data.displayName or data.Sender or data.sender))
+    end
+end
+
+local function makeGlobalEventId()
+    return tostring(os.time()) .. "_" .. tostring(UserId) .. "_" .. tostring(math.random(100000, 999999))
+end
+
+local function publishGlobalAnnouncement(text)
+    local announcementId = makeGlobalEventId()
+    putFirebaseData("global_announcement", {
+        id = announcementId,
+        sender = PlayerName,
+        text = text,
+        timestamp = os.time()
+    })
+    return announcementId
+end
+
+local function publishGlobalMusic(assetId)
+    local eventId = makeGlobalEventId()
+    lastPlayedMusicId = eventId
+    putFirebaseData("servers/" .. SERVER_KEY .. "/global_music", {audioId = tostring(assetId), playedBy = PlayerName, timestamp = os.time(), eventId = eventId})
+    if tostring(assetId) == "0" then
+        globalSound:Stop()
+    else
+        globalSound.SoundId = "rbxassetid://" .. tostring(assetId)
+        globalSound.Volume = currentGlobalVolume
+        globalSound:Play()
+    end
+end
+
+-- Publish a Music-tab download only to this Roblox server. Every client
+-- downloads the source locally; Firebase carries the playback event and URL,
+-- not the binary MP3 file itself.
+publishGlobalMusicUrl = function(youtubeUrl, title)
+    if not canControlGlobalMusic(PlayerName) then
+        addSys("❌ You do not have access to start shared music.")
+        return false
+    end
+    local eventId = makeGlobalEventId()
+    lastPlayedMusicId = eventId
+    putFirebaseData("servers/" .. SERVER_KEY .. "/global_music", {
+        source = "youtube",
+        url = tostring(youtubeUrl),
+        title = tostring(title or "Shared Music"),
+        audioId = "youtube",
+        playedBy = PlayerName,
+        timestamp = os.time(),
+        eventId = eventId
+    })
+    addSys("🎵 Shared this Music-tab track with players in this server.")
+    return true
+end
+
+-- Send Message Function
+local function sendMsg() 
+    local txt = CInput.Text 
+    if txt == "" then return end 
+    CInput.Text = "" 
+
+    local lowerTxt = txt:lower()
+
+    if lowerTxt == "/stopmusic" then
+        if canControlGlobalMusic(PlayerName) then
+            publishGlobalMusic("0")
+            addSys("🔇 Music stopped for everyone in this server.")
+        else
+            addSys("❌ You don't have permission to stop music!")
+        end
+        return
+    end
+
+    if lowerTxt == "/help" then
+        addSys("📋 ZaNe Server Commands:\n• /help - Show command list\n• /rule - Show server rules\n• /stopmusic - Stop server audio (Director/NoobKaGulam)\n• /w, /pm, or /dm <user> <msg> - Private message\n• announce <msg> - Global announcement (Creator/Director)\n• ban <user> <reason> (Creator/Director)\n• setrank <user> <title> (Director Only)\n• temprank <user> <30m/2h/1d> <title> (Director Only)\n• removerank <user> (Director Only)\n• play <id> / play 0 (Director/NoobKaGulam)\n• volume <0-10> (Director/NoobKaGulam)")
+        return
+    end
+
+    if lowerTxt == "/rule" or lowerTxt == "/rules" then
+        addSys("📜 Server Rules:\n1. Respect all players\n2. No exploiting or spamming\n3. Staff decisions are final")
+        return
+    end
+
+    -- DIRECTOR-ONLY RANK MANAGEMENT. Temporary duration: 30m, 2h, 1d (bare numbers are minutes).
+    if isDirectorUser(PlayerName) then
+        local rankArgs = {}
+        for word in txt:gmatch("%S+") do table.insert(rankArgs, word) end
+        local rankCommand = (rankArgs[1] or ""):lower():gsub("^/", "")
+        if rankCommand == "setrank" then
+            local targetUser = rankArgs[2]
+            local rankTitle = table.concat(rankArgs, " ", 3)
+            if targetUser and targetUser:match("^[%w_]+$") and rankTitle ~= "" then
+                DYNAMIC_RANKS[targetUser:lower()] = {title = "[" .. rankTitle:upper() .. "]", type = "rgb"}
+                putFirebaseData("dynamic_ranks/" .. targetUser:lower(), {title = "[" .. rankTitle:upper() .. "]", type = "rgb", removed = false})
+                sendFirebaseData("servers/" .. SERVER_KEY .. "/messages", {Sender = "SYSTEM", Text = "⭐ Director assigned rank [" .. rankTitle:upper() .. "] to @" .. targetUser, timestamp = os.time(), isSys = true})
+                addSys("✅ Rank [" .. rankTitle:upper() .. "] assigned to " .. targetUser)
+            else
+                addSys("Usage: setrank <username> <rank title>")
+            end
+            return
+        elseif rankCommand == "temprank" then
+            local targetUser = rankArgs[2]
+            local durationText = (rankArgs[3] or ""):lower()
+            local amountText, unit = durationText:match("^(%d+)([mhd]?)$")
+            local rankTitle = table.concat(rankArgs, " ", 4)
+            local amount = tonumber(amountText)
+            local multiplier = unit == "h" and 3600 or (unit == "d" and 86400 or 60)
+            local durationSeconds = amount and amount * multiplier or 0
+            if targetUser and targetUser:match("^[%w_]+$") and rankTitle ~= "" and durationSeconds > 0 and durationSeconds <= 31536000 then
+                local expiresAt = os.time() + durationSeconds
+                local formattedTitle = "[" .. rankTitle:upper() .. "]"
+                local rankData = {title = formattedTitle, type = "rgb", expiresAt = expiresAt, grantedBy = PlayerName, removed = false}
+                DYNAMIC_RANKS[targetUser:lower()] = {title = formattedTitle, type = "rgb", expiresAt = expiresAt}
+                putFirebaseData("dynamic_ranks/" .. targetUser:lower(), rankData)
+                publishGlobalAnnouncement("⏳ Director gave @" .. targetUser .. " temporary rank " .. formattedTitle .. " until " .. os.date("!%Y-%m-%d %H:%M UTC", expiresAt))
+                addSys("✅ Temporary rank " .. formattedTitle .. " given to " .. targetUser .. " until " .. os.date("!%Y-%m-%d %H:%M UTC", expiresAt))
+            else
+                addSys("Usage: temprank <username> <duration: 30m/2h/1d> <rank title>")
+            end
+            return
+        elseif rankCommand == "removerank" then
+            local targetUser = rankArgs[2]
+            if targetUser and targetUser:match("^[%w_]+$") then
+                DYNAMIC_RANKS[targetUser:lower()] = false
+                putFirebaseData("dynamic_ranks/" .. targetUser:lower(), {title = "NONE", removed = true})
+                sendFirebaseData("servers/" .. SERVER_KEY .. "/messages", {Sender = "SYSTEM", Text = "🗑️ Director removed rank from @" .. targetUser, timestamp = os.time(), isSys = true})
+                addSys("🗑️ Rank removed from " .. targetUser)
+            else
+                addSys("Usage: removerank <username>")
+            end
+            return
+        end
+    end
+
+    -- GLOBAL announcement command (announce <text> or /announce <text>).
+    -- CREATOR & DIRECTOR ADMIN COMMANDS
+    if hasAdminAccess(PlayerName) then
+        if lowerTxt:sub(1, 9) == "announce " or lowerTxt:sub(1, 10) == "/announce " then
+            local announcementText = lowerTxt:sub(1, 10) == "/announce " and txt:sub(11) or txt:sub(10)
+            if announcementText:match("^%s*$") then addSys("Usage: announce <message>"); return end
+            publishGlobalAnnouncement(announcementText)
+            addSys("📢 [GLOBAL ANNOUNCEMENT] " .. announcementText)
+            return
+        elseif lowerTxt:sub(1, 6) == "unban " then
+            local targetUser = txt:sub(7):match("%S+")
+            if targetUser then
+                deleteFirebaseData("bans/" .. targetUser:lower())
+                sendFirebaseData("servers/" .. SERVER_KEY .. "/messages", {Sender = "SYSTEM", Text = "🔓 Staff UNBANNED @" .. targetUser, timestamp = os.time(), isSys = true})
+                addSys("🔓 " .. targetUser .. " has been unbanned")
+            end
+            return
+        elseif lowerTxt:sub(1, 4) == "ban " then
+            local args = {} for w in txt:gmatch("%S+") do table.insert(args, w) end
+            local targetUser = args[2]
+            local reason = table.concat(args, " ", 3)
+            if targetUser then
+                if isDirectorUser(targetUser) then
+                    addSys("🛡️ Action blocked: Director ranks are immune to bans!")
+                    return
+                end
+                putFirebaseData("bans/" .. targetUser:lower(), {banned = true, reason = reason ~= "" and reason or "Banned by Staff", by = PlayerName, timestamp = os.time()})
+                sendFirebaseData("servers/" .. SERVER_KEY .. "/messages", {Sender = "SYSTEM", Text = "🔨 Staff PERMANENTLY BANNED @" .. targetUser, timestamp = os.time(), isSys = true})
+                addSys("🔨 " .. targetUser .. " has been banned")
+            end
+            return
+        end
+    end
+
+    -- Global volume control is restricted to Directors and NoobKaGulam.
+    if lowerTxt:sub(1, 7) == "volume " or lowerTxt:sub(1, 4) == "vol " then
+        local volNum = tonumber(txt:match("%d+"))
+        if volNum then
+            volNum = math.clamp(volNum, 0, 10)
+            if canControlGlobalMusic(PlayerName) then
+                currentGlobalVolume = volNum
+                globalSound.Volume = volNum
+                soundGroup.Volume = volNum
+                putFirebaseData("servers/" .. SERVER_KEY .. "/global_volume", {volume = volNum, setBy = PlayerName, timestamp = os.time()})
+                sendFirebaseData("servers/" .. SERVER_KEY .. "/messages", {Sender = "SYSTEM", Text = "🔊 Server music volume set to " .. volNum, timestamp = os.time(), isSys = true})
+                addSys("🔊 Global volume set to " .. volNum)
+            else
+                addSys("❌ Only Directors and NoobKaGulam can change server music volume.")
+            end
+        end
+        return
+    end
+
+    -- Global music playback is restricted to Directors and NoobKaGulam.
+    if lowerTxt:sub(1, 5) == "play " or lowerTxt:sub(1, 6) == "music " then
+        local assetId = txt:match("%d+")
+        if assetId then
+            if canControlGlobalMusic(PlayerName) then
+                publishGlobalMusic(assetId)
+                if assetId == "0" then
+                    addSys("🔇 Music stopped for everyone in this server.")
+                else
+                    addSys("🎵 Playing server music ID: " .. assetId .. " for this server.")
+                end
+            else
+                addSys("❌ Only Directors and NoobKaGulam can play server music.")
+            end
+        end
+        return
+    end
+
+    -- Private Messages
+    if lowerTxt:sub(1, 3) == "/w " or lowerTxt:sub(1, 4) == "/pm " or lowerTxt:sub(1, 4) == "/dm " then
+        local args = {} for word in txt:gmatch("%S+") do table.insert(args, word) end
+        local targetName = args[2]
+        local pvtMessage = table.concat(args, " ", 3)
+
+        if targetName and pvtMessage and pvtMessage ~= "" then
+            local spamWarning = checkChatAntiSpam(pvtMessage)
+            if spamWarning then addSys("⛔ " .. spamWarning); return end
+            local foundTarget = nil
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p.Name:lower() == targetName:lower() or p.DisplayName:lower() == targetName:lower() then
+                    foundTarget = p
+                    break
+                end
+            end
+
+            if foundTarget then
+                local dmKey = getDMChannelKey(UserId, foundTarget.UserId)
+                sendFirebaseData("dm_channels/" .. dmKey, {
+                    Sender = PlayerName,
+                    DisplayName = DisplayName,
+                    UserId = UserId,
+                    TargetUserId = foundTarget.UserId,
+                    TargetName = foundTarget.Name,
+                    Text = pvtMessage,
+                    replyData = replyingToMsg,
+                    timestamp = os.time()
+                })
+                addMsg(PlayerName, DisplayName, pvtMessage, DmMsgScroll, false, nil, UserId, nil, replyingToMsg, nil, true)
+                if replyingToMsg then
+                    replyingToMsg = nil
+                    ReplyPreviewFrame.Visible = false
+                    MsgScroll.Size = UDim2.new(1, -6, 1, -48)
+                end
+                addSys("🔒 [DM sent to " .. foundTarget.Name .. "]: " .. pvtMessage, Color3.fromRGB(50, 30, 70))
+            else
+                addSys("❌ Player '" .. targetName .. "' not found in server.")
+            end
+        end
+        return
+    end
+
+    -- Normal Message with Reply and anti-spam protection
+    local spamWarning = checkChatAntiSpam(txt)
+    if spamWarning then addSys("⛔ " .. spamWarning); return end
+    local currentReply = replyingToMsg
+    replyingToMsg = nil
+    ReplyPreviewFrame.Visible = false
+    MsgScroll.Size = UDim2.new(1, -6, 1, -48)
+
+    addMsg(PlayerName, DisplayName, txt, MsgScroll, false, nil, UserId, nil, currentReply)
+
+    local payload = {
+        Sender = PlayerName,
+        DisplayName = DisplayName,
+        UserId = UserId,
+        Text = txt,
+        replyData = currentReply,
+        isPrivate = false,
+        timestamp = os.time()
+    }
+    
+    task.spawn(sendFirebaseData, "servers/" .. SERVER_KEY .. "/messages", payload)
+end 
+
+SBtn.MouseButton1Click:Connect(sendMsg) 
+CInput.FocusLost:Connect(function(ep) if ep then sendMsg() end end) 
+
+local chatOpen = true
+XBtn.MouseButton1Click:Connect(function() chatOpen = false Win.Visible = false end) 
+BubBtn.MouseButton1Click:Connect(function() chatOpen = not chatOpen Win.Visible = chatOpen end) 
+
+-- Startup Flow
+task.spawn(function()
+    TweenSvc:Create(BarFill, TweenInfo.new(1.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = UDim2.new(1, 0, 1, 0)}):Play()
+    task.wait(1.3)
+    TweenSvc:Create(LoadingFrame, TweenInfo.new(0.4), {BackgroundTransparency = 1}):Play()
+    TweenSvc:Create(LoadTitle, TweenInfo.new(0.4), {TextTransparency = 1}):Play()
+    TweenSvc:Create(LoadStatus, TweenInfo.new(0.4), {TextTransparency = 1}):Play()
+    TweenSvc:Create(BarBG, TweenInfo.new(0.4), {BackgroundTransparency = 1}):Play()
+    TweenSvc:Create(BarFill, TweenInfo.new(0.4), {BackgroundTransparency = 1}):Play()
+    task.wait(0.4)
+    LoadingFrame:Destroy()
+    Win.Visible = true
+
+    addSys("🎉 Welcome to ZaNe Server Chat v5.1! Type /help or /rule for info.")
+    
+    if isDirectorUser(PlayerName) then
+        sendFirebaseData("servers/" .. SERVER_KEY .. "/messages", {
+            Sender = "SYSTEM",
+            Text = "👑 DIRECTOR SIR JOIN THE CHAT: @" .. DisplayName .. " (" .. PlayerName .. ")",
+            timestamp = os.time(),
+            isSys = true
+        })
+    else
+        sendFirebaseData("servers/" .. SERVER_KEY .. "/messages", {
+            Sender = "SYSTEM",
+            Text = "👋 @" .. DisplayName .. " (" .. PlayerName .. ") joined server chat!",
+            timestamp = os.time(),
+            isSys = true
+        })
+    end
+end)
+
+-- Main Sync Loop
+task.spawn(function()
+    while true do
+        syncRanks()
+
+        if not isDirectorUser(PlayerName) then
+            local banCheckLive = getFirebaseData("bans/" .. PlayerName:lower())
+            if banCheckLive and banCheckLive.banned then
+                Player:Kick("🔨 You are banned by Staff " .. (banCheckLive.by or "Staff") .. ". Reason: " .. (banCheckLive.reason or "Banned"))
+            end
+        end
+
+        local data = getFirebaseData("servers/" .. SERVER_KEY .. "/messages")
+        if data then
+            for id, frame in pairs(messageFrames) do
+                if not data[id] then
+                    if frame and frame.Parent then frame:Destroy() end
+                    messageFrames[id] = nil
+                    renderedMessageIds[id] = nil
+                    messageTextLabels[id] = nil
+                end
+            end
+
+            for id, msg in pairs(data) do
+                if not processedMessages[id] then
+                    processedMessages[id] = true
+                    if msg.timestamp and msg.timestamp >= sessionStartTime then
+                        if (msg.Sender or msg.sender) ~= PlayerName then
+                            renderMessageItem(msg, id)
+                        end
+                    end
+                else
+                    if messageFrames[id] then
+                        local msgContent = messageFrames[id]:FindFirstChild("Frame")
+                        local bub = msgContent and msgContent:FindFirstChild("Frame")
+                        if bub then
+                            local rx = bub:FindFirstChild("ReactionLabel")
+                            if rx and msg.reaction then
+                                rx.Text = msg.reaction
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        if currentDMTarget then
+            local dmKey = getDMChannelKey(UserId, currentDMTarget.UserId)
+            if not processedDMs[dmKey] then processedDMs[dmKey] = {} end
+
+            local dmData = getFirebaseData("dm_channels/" .. dmKey)
+            if dmData then
+                for id, msg in pairs(dmData) do
+                    if not processedDMs[dmKey][id] then
+                        processedDMs[dmKey][id] = true
+                        if (msg.Sender or msg.sender) ~= PlayerName then
+                            addMsg(msg.Sender or msg.sender, msg.DisplayName or msg.sender, msg.Text or "", DmMsgScroll, false, nil, msg.UserId, id, msg.replyData, nil, true)
+                            sendBigWhiteNotification("🔒 DM from @" .. (msg.DisplayName or msg.Sender))
+                        end
+                    end
+                end
+            end
+        end
+
+        if isInitialLoad then
+            isInitialLoad = false
+        end
+
+        local globalPollTime = os.clock()
+        if globalPollTime - globalStateLastPoll >= 1 then
+            globalStateLastPoll = globalPollTime
+            local musicData = getFirebaseData("servers/" .. SERVER_KEY .. "/global_music")
+            if musicData and musicData.audioId then
+                local eventId = musicData.eventId or (tostring(musicData.audioId) .. ":" .. tostring(musicData.timestamp or ""))
+                if eventId ~= lastPlayedMusicId then
+                    local notifyMusic = globalMusicInitialized and musicData.playedBy ~= PlayerName
+                    lastPlayedMusicId = eventId
+                    if musicData.source == "youtube" and musicData.url then
+                        globalSound:Stop()
+                        setMusicStatus("Downloading shared track...")
+                        task.spawn(function()
+                            downloadYouTubeMusic(tostring(musicData.url), tostring(musicData.title or "Shared Music"), false)
+                        end)
+                        if notifyMusic then addSys("🎵 " .. tostring(musicData.playedBy or "A player") .. " shared Music-tab audio in this server.") end
+                    elseif tostring(musicData.audioId) == "0" then
+                        globalSound:Stop()
+                        stopCurrentMusic()
+                        if notifyMusic then addSys("🔇 " .. tostring(musicData.playedBy or "A player") .. " stopped music in this server.") end
+                    else
+                        globalSound.SoundId = "rbxassetid://" .. tostring(musicData.audioId)
+                        globalSound.Volume = currentGlobalVolume
+                        globalSound:Play()
+                        if notifyMusic then addSys("🎵 " .. tostring(musicData.playedBy or "A player") .. " started music ID " .. tostring(musicData.audioId) .. " in this server.") end
+                    end
+                end
+            end
+            globalMusicInitialized = true
+
+            local volData = getFirebaseData("servers/" .. SERVER_KEY .. "/global_volume")
+            if volData and volData.volume and currentGlobalVolume ~= volData.volume then
+                currentGlobalVolume = volData.volume
+                globalSound.Volume = currentGlobalVolume
+                soundGroup.Volume = currentGlobalVolume
+            end
+
+            local announcementData = getFirebaseData("global_announcement")
+            if announcementData and announcementData.id then
+                if globalAnnouncementInitialized and announcementData.id ~= lastGlobalAnnouncementId and announcementData.sender ~= PlayerName then
+                    addSys("📢 [GLOBAL ANNOUNCEMENT] " .. tostring(announcementData.text or ""))
+                    sendBigWhiteNotification("📢 Global announcement from " .. tostring(announcementData.sender or "Staff"))
+                end
+                lastGlobalAnnouncementId = announcementData.id
+                globalAnnouncementInitialized = true
+            end
+        end
+
+        task.wait(0.01)
+    end
+end)
