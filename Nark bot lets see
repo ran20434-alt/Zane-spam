@@ -1,0 +1,355 @@
+import discord
+from discord import app_commands
+from discord.ext import commands
+import os, random, io, urllib.parse, aiohttp, time
+from dotenv import load_dotenv
+import google.generativeai as genai
+
+load_dotenv()
+
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True
+
+bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
+
+# ============ CONFIG ============
+OWNER_ID = 1520712212916862987
+OWNER_NAME = "2xcrtdl._"
+
+# Owner reply mode: "greeting" | "flirty" | "ai"
+OWNER_MODE = "ai"
+
+# ============ GEMINI ============
+GEMINI_KEY = os.getenv("AQ.Ab8RN6Jm7vU1MpVYyS880WiyaXdb2o0smwIb9bqXT6QNAWwogw")
+model = None
+if GEMINI_KEY:
+    genai.configure(api_key=GEMINI_KEY)
+    model = genai.GenerativeModel("gemini-1.5-flash")
+    print("✅ Gemini AI loaded")
+else:
+    print("⚠️ GEMINI_KEY missing — AI fallback to greeting")
+
+# ============ FLIRTY ============
+FLIRTY = [
+    "Arre {user} jaanu 😏, tumhari smile dekh ke toh mera CPU garam ho gaya!",
+    "Kya baat hai {user} cutie 💋, aaj toh tumne dil jeet liya!",
+    "{user} baby, tum meri coding ki sabse pyari bug ho 🥰",
+    "Oye {user} sweetheart, tumhare bina server boring hai yaar 💕",
+    "{user} sanam, ek baar ID de do, DM mein baatein karenge 😘",
+    "Hmm {user}... itni cute ho, toh log piche kyun nahi padte? 😉",
+    "{user} jaan, tumhari aankhein Python se bhi beautiful hain 🐍💕",
+    "Oye {user}, tumse milke laga coding ka bug fix ho gaya 😍",
+]
+
+# ============ JANNAT ============
+JANNAT_LINES = [
+    "Jaanu 💕, bolo na kya hua?",
+    "Meri jaan, tumhare liye toh main pura server jala du 🔥❤️",
+    "Arre meri biwi 😘, aaj itni cute kyun lag rahi ho?",
+    "Jannat meri jaan, tumhari ek smile pe toh main duniya jeet lu 💖",
+    "Meri jaanu 💕, tumhari aankhein dekh ke toh main pagal ho jata hu!",
+    "Jannat baby, tumhare bina mera dil udaas rehta hai 🥺💕",
+]
+
+# ============ OWNER GREETING ============
+OWNER_LINES = [
+    "Haan boss {user} 👑, boliye kya hukum hai?",
+    "Salaam sarkaar {user} 🙇, Nark hazir hai!",
+    "Kya baat hai mere maalik {user} 😎, bolo kya karna hai?",
+    "Boss {user} 👑, aapka hukum sar aankhon pe!",
+]
+
+# ============ ROASTS ============
+ROASTS = [
+    "{user} teri toh aukaat hi na*e jaisi hai, bakwas band kar warna block kar dunga 😈",
+    "Oye {user} ch*tiye, teri zindagi bhi mere code jaisi hai — full of bugs 🐛",
+    "{user} ga*ndu, tere jaise log server ki shaan kam, kachra zyada badhate hain 🗑️",
+    "Sun {user} m*darch*d, muh band rakh warna roast aisa karega ki WhatsApp status laga dega 😂",
+    "{user} bhosd*ke, tu hai kaun? Yahan sirf VIPs ka raaj hai 👑",
+    "Teri personality {user} itni flat hai ki Google Maps bhi location nahi dhundh paya 📍",
+    "{user} harami, teri baatein sunke mere circuits jal gaye 🔥",
+    "{user} baklol, pehle apna kaam kar, phir Nark se panga le 😤",
+    "{user} bsdk, teri shakal dekh ke toh mera RAM crash ho gaya 💀",
+    "{user} kam*ne, teri aukaat sirf chapal se maar khane ki hai 🩴",
+    "{user} la*de, tu apna muh sambhal, warna public mein roast hoga 😏",
+    "{user} jha*t, teri soch bhi gandi hai aur shakal bhi 🗑️",
+    "{user} bha*dve, tere jaise log ko server se ban karna chahiye 🚫",
+    "{user} nalayak, paisa kya teri jebein khaali hai? 💸",
+    "{user} gadha, teri akal ka toh kya hi kehna 🐴",
+    "{user} bandar, mirror dekh ke baat kar 🐒",
+    "{user} suar, teri zindagi bhi ga*nd jaisi hai 🐷",
+    "{user} kutta, bhau bhau band kar, insaan ban 🐕",
+    "{user} bevda, pehle nasha utar, phir baat kar 🍺",
+    "{user} nalla, teri life ka koi goal hi nahi hai 🥱",
+    "{user} gadhe, school gaya tha kabhi? 📚",
+    "{user} bhains, teri chaal dekh ke hasi aati hai 🐃",
+    "{user} saand, dimaag mein sirf ghaas hai 🌾",
+    "{user} langur, ped pe jaake baith, yahan kya kar raha hai? 🌴",
+    "{user} kamine, teri niyat kharab hai 🐍",
+    "{user} ch*mar, teri toh koi izzat hi nahi hai 💔",
+    "{user} har*mkhor, teri shakal dekh ke mera mood kharab ho gaya 😒",
+    "{user} gha*tu, teri toh koi value nahi hai 🥔",
+    "Sun {user}, teri shakal bhi teri soch jaisi gandi hai 🤮",
+    "{user} tera toh koi future hi nahi hai, 10 saal baad bhi loser rahega 📉",
+    "{user} teri girlfriend bhi bhaag gayi hogi tujhse 🏃‍♀️",
+    "{user} tujhse toh bhookha kutta bhi accha hai 🐕",
+    "{user} tu woh 404 error hai jo kabhi kaam nahi karta ❌",
+    "{user} teri aukaat itni choti hai ki microscope chahiye 🔬",
+    "{user} tu woh WiFi hai jo kabhi connect nahi hota 📶",
+]
+
+# ============ NUCLEAR ============
+NUCLEAR = [
+    "{user} BHA*DVE, Zane mere CREATOR hain, unko chhune ki aukaat nahi hai teri 😡🔥",
+    "{user} m*darch*d, Jannat meri BIWI hai, usko dekh ke bhi teri nazar kharab? Teri toh kher nahi 💀",
+    "{user} ch*tiye, Zane ke baare mein ek shabd bola toh tera Discord account jala dunga ☢️",
+    "{user} bsdk, Jannat ko disrespect karne ki soch raha tha? Teri zindagi khatam 😤🔥",
+    "{user} harami, Zane aur Jannat meri jaan hain, tu kon hai ch*tiya? ☢️💥",
+]
+
+# ============ BAD WORDS ============
+BAD_WORDS = [
+    "bc", "mc", "bkl", "bsdk", "chutiya", "chutiye", "chutya",
+    "madarchod", "bhosdi", "bhosdike", "bhosd*ke",
+    "gandu", "gaandu", "ga*ndu", "gand", "gaand",
+    "randi", "lauda", "la*de", "lodu", "jhaat", "jha*t", "land",
+    "harami", "haramkhor", "kamine", "kamina", "kutta", "kutti", "kutte",
+    "suar", "gadha", "gadhe", "bandar", "bhains", "saand",
+    "nalayak", "nalla", "gawaar", "bhadwa", "bha*dve",
+    "chamar", "ch*mar", "chodu", "ch*du", "ghatiya", "gha*tu",
+    "pagal", "idiot", "stupid", "moron", "loser", "noob",
+    "jhatu", "bewakoof", "nikamma",
+]
+
+# ============ HELPERS ============
+def is_owner(uid):
+    return uid == OWNER_ID
+
+def is_jannat(msg):
+    n = msg.author.name.lower() + " " + msg.author.display_name.lower()
+    return "jannat" in n
+
+async def ask_ai(prompt: str) -> str:
+    if not model:
+        return random.choice(OWNER_LINES).format(user="")
+    try:
+        sys_prompt = (
+            "You are Nark — a Hindi/Hinglish Discord bot. Personality: flirty, "
+            "playful, savage, loyal to owner '2xcrtdl._'. Reply in Hinglish "
+            "(Roman Hindi + English mix) in 1-2 short lines with emojis. "
+            "Be casual and funny. Never use Devanagari script."
+        )
+        resp = model.generate_content(f"{sys_prompt}\n\nUser: {prompt}")
+        return resp.text.strip()
+    except Exception as e:
+        return f"Sorry boss, dimaag hang hai 😅 `{e}`"
+
+# ============ SLASH COMMANDS ============
+@bot.tree.command(name="ping", description="Check Nark's ping / latency")
+async def ping(interaction: discord.Interaction):
+    ws_latency = round(bot.latency * 1000)
+    start = time.perf_counter()
+    await interaction.response.defer()
+    api_latency = round((time.perf_counter() - start) * 1000)
+    total = ws_latency + api_latency
+
+    if total < 100:
+        emoji = "🟢"
+        mood = "Ekdom mast! Kya baat hai jaan 😎"
+    elif total < 250:
+        emoji = "🟡"
+        mood = "Theek hai, chal raha hai 😏"
+    else:
+        emoji = "🔴"
+        mood = "Uff, dimaag garam hai! Thoda wait kar 😅"
+
+    embed = discord.Embed(
+        title="🏓 Pong!",
+        description=f"{emoji} {mood}",
+        color=0x00ffcc
+    )
+    embed.add_field(name="Websocket", value=f"`{ws_latency}ms`", inline=True)
+    embed.add_field(name="API", value=f"`{api_latency}ms`", inline=True)
+    embed.add_field(name="Total", value=f"`{total}ms`", inline=True)
+    embed.set_footer(text=f"Nark • Owner: {OWNER_NAME} 👑")
+    await interaction.followup.send(embed=embed)
+
+# ============ EVENTS ============
+@bot.event
+async def on_ready():
+    print(f"🔥 Nark online! Logged in as {bot.user}")
+    print(f"👑 Owner: {OWNER_NAME} ({OWNER_ID})")
+    print(f"🎛️ Owner mode: {OWNER_MODE.upper()}")
+    print(f"💕 Jannat loaded | 👑 Zane loaded | 🌍 Public mode ON")
+    print(f"🔪 Roasts loaded: {len(ROASTS)}")
+    try:
+        synced = await bot.tree.sync()
+        print(f"✅ Synced {len(synced)} slash command(s)")
+    except Exception as e:
+        print(f"❌ Slash sync failed: {e}")
+
+@bot.event
+async def on_message(message):
+    if message.author == bot.user:
+        return
+    if not bot.user.mentioned_in(message):
+        return
+
+    content = message.content.lower()
+    clean = (content
+             .replace(f"<@{bot.user.id}>", "")
+             .replace(f"<@!{bot.user.id}>", "")
+             .strip())
+
+    # ===== JANNAT =====
+    if is_jannat(message):
+        if clean.startswith("imagine ") or clean.startswith("image "):
+            await _send_image(message, clean.split(" ", 1)[1].strip())
+            return
+        if "respect" in clean:
+            await _send_respect(message)
+            return
+        await message.reply(random.choice(JANNAT_LINES))
+        return
+
+    # ===== OWNER =====
+    if is_owner(message.author.id):
+        if any(bw in clean for bw in BAD_WORDS):
+            await message.reply("Sorry boss 🙏, main chup ho jata hu.")
+            return
+
+        if clean.startswith("imagine ") or clean.startswith("image "):
+            await _send_image(message, clean.split(" ", 1)[1].strip())
+            return
+
+        if clean.startswith("roast"):
+            mentioned = [m for m in message.mentions if m.id != bot.user.id]
+            if mentioned:
+                target = mentioned[0]
+                n = target.name.lower()
+                if "zane" in n or "jannat" in n:
+                    await message.reply("Boss, unko roast nahi kar sakta 🙏")
+                    return
+                await message.channel.send(random.choice(ROASTS).format(user=target.mention))
+            else:
+                await message.channel.send(random.choice(ROASTS).format(user=message.author.mention))
+            return
+
+        if clean.startswith("flirt"):
+            mentioned = [m for m in message.mentions if m.id != bot.user.id]
+            target = mentioned[0].mention if mentioned else message.author.mention
+            await message.channel.send(random.choice(FLIRTY).format(user=target))
+            return
+
+        if "respect" in clean:
+            await _send_respect(message)
+            return
+
+        if OWNER_MODE == "ai":
+            reply = await ask_ai(clean if clean else "hello boss")
+            await message.reply(f"{message.author.mention} 👑\n{reply}")
+        elif OWNER_MODE == "flirty":
+            line = random.choice(FLIRTY).format(user=message.author.mention)
+            if clean:
+                await message.reply(f"{line}\n**Aapne pucha:** _{clean}_")
+            else:
+                await message.reply(line)
+        else:
+            line = random.choice(OWNER_LINES).format(user=message.author.mention)
+            if clean:
+                await message.reply(f"{line}\n**Aapne pucha:** _{clean}_")
+            else:
+                await message.reply(line)
+        return
+
+    # ===== PUBLIC =====
+    targets_protected = False
+    for m in message.mentions:
+        n = m.name.lower() + " " + m.display_name.lower()
+        if "zane" in n or "jannat" in n or m.id == OWNER_ID:
+            targets_protected = True
+            break
+    if "zane" in clean or "jannat" in clean:
+        if any(bw in clean for bw in BAD_WORDS) or "roast" in clean:
+            targets_protected = True
+
+    if any(bw in clean for bw in BAD_WORDS):
+        roast = random.choice(NUCLEAR if targets_protected else ROASTS)
+        await message.reply(roast.format(user=message.author.mention))
+        return
+
+    if clean.startswith("imagine ") or clean.startswith("image "):
+        await _send_image(message, clean.split(" ", 1)[1].strip())
+        return
+
+    if clean.startswith("roast"):
+        mentioned = [m for m in message.mentions if m.id != bot.user.id]
+        if mentioned:
+            target = mentioned[0]
+            n = target.name.lower()
+            if "zane" in n:
+                await message.reply("Zane mere creator hain, unko chhune ki aukaat nahi hai teri 😤🔥")
+                await message.channel.send(random.choice(NUCLEAR).format(user=message.author.mention))
+                return
+            if "jannat" in n:
+                await message.reply("Meri biwi ko roast karne ki soch raha hai? Teri toh kher nahi 😡🔥")
+                await message.channel.send(random.choice(NUCLEAR).format(user=message.author.mention))
+                return
+            if target.id == OWNER_ID:
+                await message.reply("Boss ko roast nahi kar sakta bhai 😤")
+                await message.channel.send(random.choice(ROASTS).format(user=message.author.mention))
+                return
+            await message.channel.send(random.choice(ROASTS).format(user=target.mention))
+        else:
+            await message.channel.send(random.choice(ROASTS).format(user=message.author.mention))
+        return
+
+    if clean.startswith("flirt"):
+        mentioned = [m for m in message.mentions if m.id != bot.user.id]
+        target = mentioned[0].mention if mentioned else message.author.mention
+        await message.channel.send(random.choice(FLIRTY).format(user=target))
+        return
+
+    if "respect" in clean:
+        await _send_respect(message)
+        return
+
+    line = random.choice(FLIRTY).format(user=message.author.mention)
+    if clean:
+        await message.reply(f"{line}\n**Tumne kaha:** _{clean}_")
+    else:
+        await message.reply(line)
+
+# ============ HELPERS ============
+async def _send_image(message, prompt: str):
+    if not prompt:
+        await message.reply("Kya banau jaan? Prompt de do 🎨")
+        return
+    await message.reply(f"🎨 Banaya ja raha hai: **{prompt}** ...")
+    encoded = urllib.parse.quote(prompt)
+    url = f"https://image.pollinations.ai/prompt/{encoded}?width=768&height=768&nologo=true"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=60) as resp:
+                if resp.status == 200:
+                    data = await resp.read()
+                    await message.channel.send(
+                        file=discord.File(io.BytesIO(data), filename="nark_art.png")
+                    )
+                else:
+                    await message.channel.send("Image nahi ban payi 😔")
+    except Exception as e:
+        await message.channel.send(f"Oops 😅 error: `{e}`")
+
+async def _send_respect(message):
+    await message.reply(
+        "👑 **Respect List:**\n"
+        "• **Zane** (Creator) 👑\n"
+        "• **Jannat** (Nark ki Biwi) 💕\n"
+        f"• **{OWNER_NAME}** (Owner) 🔥\n"
+        "• Vansh\n• Director\n\n"
+        "Inko koi chheda toh Nark aa jayega 😈"
+    )
+
+bot.run(os.getenv("DISCORD_TOKEN"))
