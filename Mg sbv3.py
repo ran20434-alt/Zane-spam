@@ -15,9 +15,9 @@ from datetime import datetime, timezone, timedelta
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
-PERMANENT_OWNER = 1238882845322121308
+PERMANENT_OWNER = 1520712212916862987
 BOT_TOKENS = [
-    "token",
+    "MTUyMzAzMjQ2NjY4NjczODY0Nw.GtAot7.mexq_vuTed_2rU8K3C_1OXIRRjCvBe8PN_8TjU",
   "token",
   "token"
 
